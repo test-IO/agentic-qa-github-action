@@ -41,7 +41,7 @@ curl -s "$HOST/api/v1/projects/$PROJECT_ID/check_suites" -H "Authorization: ApiK
 | `check-suite-id` | yes | | Check suite UUID |
 | `url` | | | URL to test. Required unless `environment-id` is set |
 | `environment-id` | | | Environment whose URL is the target. Ignored when `url` is set |
-| `session-name` | | workflow name + short SHA | Display name for the session |
+| `session-name` | | workflow name, short SHA and run number | Display name for the session |
 | `workflow-type` | | `web` | `web`, `accessibility`, or `localization` |
 | `browser-type` | | installation default | e.g. `chrome` |
 | `viewport` | | installation default | e.g. `1280x800` |

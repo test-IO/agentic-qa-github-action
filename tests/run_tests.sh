@@ -29,7 +29,7 @@ run_action() {
   : > "$WORK/output"; : > "$WORK/summary"
   env \
     GITHUB_OUTPUT="$WORK/output" GITHUB_STEP_SUMMARY="$WORK/summary" \
-    GITHUB_WORKFLOW="CI" GITHUB_SHA="abc1234567" \
+    GITHUB_WORKFLOW="CI" GITHUB_SHA="abc1234567" GITHUB_RUN_NUMBER="14" \
     AQ_HOST="$BASE" AQ_TOKEN="secret-token" AQ_PROJECT_ID="proj-1" \
     AQ_CHECK_SUITE_ID="suite-1" AQ_URL="https://staging.example.com" AQ_ENVIRONMENT_ID="" \
     AQ_SESSION_NAME="" AQ_WORKFLOW_TYPE="web" AQ_BROWSER_TYPE="chrome" AQ_VIEWPORT="1280x800" \
@@ -68,6 +68,7 @@ assert_file_has "$WORK/output" "status=completed" "reports the session status"
 assert_file_has "$WORK/summary" "| Failed | 1 |" "writes a job summary"
 assert_file_has "$WORK/payload.json" '"workflow_type": "web"' "sends workflow_type"
 assert_file_has "$WORK/payload.json" '"test_urls"' "sends test_urls"
+assert_file_has "$WORK/payload.json" '"name": "CI abc1234 #14"' "names the session with the run number"
 
 if python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])" "$WORK/report.xml"; then
   echo "ok   writes valid JUnit XML"

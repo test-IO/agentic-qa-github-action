@@ -83,6 +83,14 @@ session_name="$AQ_SESSION_NAME"
 if [[ -z "$session_name" ]]; then
   sha="${GITHUB_SHA:-}"
   session_name="${GITHUB_WORKFLOW:-CI} ${sha:0:7}"
+  # without the run number, every re-run of the same commit lands an
+  # identically named session in the UI
+  if [[ -n "${GITHUB_RUN_NUMBER:-}" ]]; then
+    session_name="$session_name #$GITHUB_RUN_NUMBER"
+    if [[ "${GITHUB_RUN_ATTEMPT:-1}" != "1" ]]; then
+      session_name="$session_name.$GITHUB_RUN_ATTEMPT"
+    fi
+  fi
 fi
 
 if is_true "$AQ_USE_REPLAYS"; then replays_json=true; else replays_json=false; fi
