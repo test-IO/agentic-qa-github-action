@@ -192,15 +192,20 @@ if [[ -n "$AQ_JUNIT_PATH" ]]; then
   mkdir -p "$(dirname "$AQ_JUNIT_PATH")"
   jq -r '
     def esc: (. // "") | tostring | @html;
+    def secs: (try fromdateiso8601 catch null);
+    def dur:
+      ((.created_at | secs) as $a | (.updated_at | secs) as $b
+       | if ($a != null and $b != null and $b >= $a) then ($b - $a) else 0 end);
     .check_executions as $ce
     | ($ce | length) as $total
     | ([$ce[] | select(.state == "failed")]  | length) as $failed
     | ([$ce[] | select(.state == "blocked" or .state == "running")] | length) as $skipped
+    | ([$ce[] | dur] | add // 0) as $time
     | "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-      "<testsuites name=\"Agentic QA\" tests=\"\($total)\" failures=\"\($failed)\" skipped=\"\($skipped)\">",
-      "  <testsuite name=\"Agentic QA\" tests=\"\($total)\" failures=\"\($failed)\" skipped=\"\($skipped)\">",
+      "<testsuites name=\"Agentic QA\" tests=\"\($total)\" failures=\"\($failed)\" skipped=\"\($skipped)\" time=\"\($time)\">",
+      "  <testsuite name=\"Agentic QA\" tests=\"\($total)\" failures=\"\($failed)\" skipped=\"\($skipped)\" time=\"\($time)\">",
       ($ce[] |
-        "    <testcase name=\"\(.check.name | esc)\" classname=\"\(.check.check_suite_name | esc)\">"
+        "    <testcase name=\"\(.check.name | esc)\" classname=\"\(.check.check_suite_name | esc)\" time=\"\(dur)\">"
         + (if   .state == "failed"  then "\n      <failure message=\"check failed\">\(.reasoning | esc)</failure>\n    "
            elif .state == "blocked" then "\n      <skipped message=\"blocked\"/>\n    "
            elif .state == "running" then "\n      <skipped message=\"still running when the run ended\"/>\n    "

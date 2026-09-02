@@ -9,11 +9,13 @@ PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8771
 WORK = sys.argv[3] if len(sys.argv) > 3 else "/tmp"
 
 
-def check(name, state, reasoning=None):
+def check(name, state, reasoning=None, seconds=12):
     return {
         "id": name,
         "state": state,
         "reasoning": reasoning,
+        "created_at": "2026-09-02T10:00:00Z",
+        "updated_at": "2026-09-02T10:00:%02dZ" % seconds,
         "check": {"name": name, "check_suite_name": "Smoke"},
     }
 

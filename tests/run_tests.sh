@@ -78,6 +78,7 @@ else
   fail=$((fail + 1))
 fi
 assert_file_has "$WORK/report.xml" "&lt;Submit&gt;" "escapes XML in check output"
+assert_file_has "$WORK/report.xml" 'time="12"' "records per-check duration"
 
 run_action green 0 "passes the build when every check passes"
 run_action mixed 0 "honours continue-on-failure"   AQ_CONTINUE_ON_FAILURE=true
