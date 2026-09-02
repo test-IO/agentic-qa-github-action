@@ -29,7 +29,6 @@ echo "::add-mask::$AQ_TOKEN"
 : "${AQ_JUNIT_PATH:=}"
 
 HOST="${AQ_HOST%/}"
-API="$HOST/api/v1/projects/$AQ_PROJECT_ID"
 
 is_true() { [[ "${1,,}" == "true" ]]; }
 
