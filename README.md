@@ -22,14 +22,55 @@ Agentic QA is single-tenant: every customer runs their own installation, so `hos
 
 **2. Mint a token.** In the Agentic QA UI, go to **System Configuration → API / MCP Config**, create a token, and click **Show API Config**. Leave *destructive actions* off; CI never needs it. Only admins can create tokens.
 
-**3. Store the settings.** Token as a repository **secret**; host, project and suite IDs as repository **variables**.
-
-**4. Find the IDs.** Both are UUIDs from your installation:
+**3. Find the IDs.** Both are UUIDs from your installation:
 
 ```bash
 curl -s "$HOST/api/v1/projects" -H "Authorization: ApiKey $TOKEN" | jq '.projects[] | {id, name}'
 curl -s "$HOST/api/v1/projects/$PROJECT_ID/check_suites" -H "Authorization: ApiKey $TOKEN" | jq '.check_suites[] | {id, name}'
 ```
+
+**4. Store the settings on the repository.** The token goes in a secret so it is masked in logs; the rest go in variables so you can read them while debugging.
+
+| Name | Kind | Value |
+|---|---|---|
+| `AGENTIC_QA_TOKEN` | secret | the token from step 2 |
+| `AGENTIC_QA_HOST` | variable | `https://your-installation.example.com` |
+| `AGENTIC_QA_PROJECT` | variable | project UUID |
+| `AGENTIC_QA_SUITE` | variable | check suite UUID |
+
+### Adding them in the web UI
+
+Both live in the same place. Open the repository and click **Settings** (if you cannot see it, open the **⋯** dropdown on the tab bar). In the left sidebar under *Security*, select **Secrets and variables**, then **Actions**.
+
+For each **variable**:
+
+1. Open the **Variables** tab.
+2. Click **New repository variable**.
+3. Fill in **Name** and **Value**.
+4. Click **Add variable**.
+
+For the **secret**:
+
+1. Open the **Secrets** tab.
+2. Click **New repository secret**.
+3. Fill in **Name** and **Secret**.
+4. Click **Add secret**.
+
+A secret cannot be read back afterwards — you can only overwrite it. Variable names accept letters, digits and underscores, must not start with a digit or with `GITHUB_`, and are matched case-insensitively.
+
+You need admin rights on the repository. If several repositories share one installation, define these at the organization level instead — the same screen exists under the organization's settings, and repository values override organization ones.
+
+### Or from the command line
+
+```bash
+gh variable set AGENTIC_QA_HOST    --repo OWNER/REPO --body "https://your-installation.example.com"
+gh variable set AGENTIC_QA_PROJECT --repo OWNER/REPO --body "PROJECT_UUID"
+gh variable set AGENTIC_QA_SUITE   --repo OWNER/REPO --body "SUITE_UUID"
+
+gh secret set AGENTIC_QA_TOKEN --repo OWNER/REPO
+```
+
+Leaving `--body` off the secret makes `gh` prompt for the value, so it never lands in your shell history.
 
 ## Inputs
 
