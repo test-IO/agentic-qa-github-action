@@ -5,7 +5,7 @@ Run an [Agentic QA](https://test.io/ai-in-qa/agentic-qa) check suite from a work
 The action creates a test session on your installation, starts it, waits for it to finish, and turns the per-check results into a build result, a job summary, and optionally a JUnit report.
 
 ```yaml
-- uses: Romaaan3/aqaction@v1
+- uses: test-IO/agentic-qa-github-action@v1
   with:
     host: ${{ vars.AGENTIC_QA_HOST }}
     token: ${{ secrets.AGENTIC_QA_TOKEN }}
@@ -83,7 +83,7 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: Romaaan3/aqaction@v1
+      - uses: test-IO/agentic-qa-github-action@v1
         id: qa
         with:
           host: ${{ vars.AGENTIC_QA_HOST }}
@@ -108,7 +108,7 @@ strategy:
   matrix:
     workflow-type: [web, accessibility, localization]
 steps:
-  - uses: Romaaan3/aqaction@v1
+  - uses: test-IO/agentic-qa-github-action@v1
     with:
       workflow-type: ${{ matrix.workflow-type }}
       # ...
@@ -117,7 +117,7 @@ steps:
 Report without blocking the merge:
 
 ```yaml
-- uses: Romaaan3/aqaction@v1
+- uses: test-IO/agentic-qa-github-action@v1
   with:
     continue-on-failure: true
     # ...
@@ -126,7 +126,7 @@ Report without blocking the merge:
 Fire and forget, for a nightly run you inspect in the UI:
 
 ```yaml
-- uses: Romaaan3/aqaction@v1
+- uses: test-IO/agentic-qa-github-action@v1
   with:
     await-completion: false
     # ...
