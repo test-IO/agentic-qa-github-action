@@ -1,0 +1,121 @@
+name: 'Agentic QA'
+description: 'Run an Agentic QA check suite against a URL and fail the build when checks fail.'
+author: 'test-io'
+
+branding:
+  icon: 'check-circle'
+  color: 'purple'
+
+inputs:
+  host:
+    description: 'Base URL of your Agentic QA installation, e.g. https://qa.example.com'
+    required: true
+  token:
+    description: 'API token. Create it under System Configuration -> API / MCP Config, then store it as a secret.'
+    required: true
+  project-id:
+    description: 'UUID of the project that owns the check suite.'
+    required: true
+  check-suite-id:
+    description: 'UUID of the check suite to run.'
+    required: true
+  url:
+    description: 'URL to test. Required unless environment-id is set.'
+    required: false
+    default: ''
+  environment-id:
+    description: 'Environment whose URL is used as the target. Ignored when url is set.'
+    required: false
+    default: ''
+  session-name:
+    description: 'Display name for the session. Defaults to the workflow name and short SHA.'
+    required: false
+    default: ''
+  workflow-type:
+    description: 'Which workflow to run: web, accessibility, or localization.'
+    required: false
+    default: 'web'
+  browser-type:
+    description: 'Browser engine, e.g. chrome. Defaults to the installation default.'
+    required: false
+    default: ''
+  viewport:
+    description: 'Viewport override, e.g. 1280x800.'
+    required: false
+    default: ''
+  use-replays:
+    description: 'Replay the latest recording per check instead of running fresh AI execution.'
+    required: false
+    default: 'false'
+  await-completion:
+    description: 'Wait for the session to finish. When false the action starts the run and exits.'
+    required: false
+    default: 'true'
+  continue-on-failure:
+    description: 'Report results but always exit 0.'
+    required: false
+    default: 'false'
+  fail-on-blocked:
+    description: 'Treat blocked checks as failures. Blocked usually means a technical problem, not a bug.'
+    required: false
+    default: 'true'
+  timeout-seconds:
+    description: 'How long to wait for the session to finish.'
+    required: false
+    default: '1800'
+  poll-interval-seconds:
+    description: 'Seconds between status polls.'
+    required: false
+    default: '15'
+  junit-path:
+    description: 'Write a JUnit XML report to this path. Empty disables it.'
+    required: false
+    default: ''
+
+outputs:
+  session-id:
+    description: 'UUID of the created test session.'
+    value: ${{ steps.run.outputs.session-id }}
+  session-url:
+    description: 'Link to the session in the Agentic QA UI.'
+    value: ${{ steps.run.outputs.session-url }}
+  status:
+    description: 'Final session status: completed, failed, cancelled, or timed-out.'
+    value: ${{ steps.run.outputs.status }}
+  checks-total:
+    description: 'Number of check executions.'
+    value: ${{ steps.run.outputs.checks-total }}
+  checks-passed:
+    description: 'Number of checks that passed.'
+    value: ${{ steps.run.outputs.checks-passed }}
+  checks-failed:
+    description: 'Number of checks that failed.'
+    value: ${{ steps.run.outputs.checks-failed }}
+  checks-blocked:
+    description: 'Number of checks that were blocked.'
+    value: ${{ steps.run.outputs.checks-blocked }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: run
+      shell: bash
+      run: ${{ github.action_path }}/scripts/run.sh
+      env:
+        AQ_HOST: ${{ inputs.host }}
+        AQ_TOKEN: ${{ inputs.token }}
+        AQ_PROJECT_ID: ${{ inputs.project-id }}
+        AQ_CHECK_SUITE_ID: ${{ inputs.check-suite-id }}
+        AQ_URL: ${{ inputs.url }}
+        AQ_ENVIRONMENT_ID: ${{ inputs.environment-id }}
+        AQ_SESSION_NAME: ${{ inputs.session-name }}
+        AQ_WORKFLOW_TYPE: ${{ inputs.workflow-type }}
+        AQ_BROWSER_TYPE: ${{ inputs.browser-type }}
+        AQ_VIEWPORT: ${{ inputs.viewport }}
+        AQ_USE_REPLAYS: ${{ inputs.use-replays }}
+        AQ_AWAIT_COMPLETION: ${{ inputs.await-completion }}
+        AQ_CONTINUE_ON_FAILURE: ${{ inputs.continue-on-failure }}
+        AQ_FAIL_ON_BLOCKED: ${{ inputs.fail-on-blocked }}
+        AQ_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        AQ_POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
+        AQ_JUNIT_PATH: ${{ inputs.junit-path }}
