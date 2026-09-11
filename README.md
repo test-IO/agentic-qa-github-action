@@ -319,6 +319,42 @@ jobs:
 
 A check suite belongs to one product, and a product is either web or mobile, so the suite decides the channel — you cannot point a web suite at `channel: mobile` or the reverse.
 
+Run mobile sessions in parallel across platforms. Each platform needs its own suite and its own binary, so carry both in the matrix:
+
+```yaml
+strategy:
+  fail-fast: false
+  matrix:
+    include:
+      - name: android
+        platform: android
+        suite: ${{ vars.AGENTIC_QA_SUITE_ANDROID }}
+        binary: ${{ vars.AGENTIC_QA_BINARY_ANDROID }}
+      - name: ios
+        platform: ios
+        suite: ${{ vars.AGENTIC_QA_SUITE_IOS }}
+        binary: ${{ vars.AGENTIC_QA_BINARY_IOS }}
+steps:
+  - uses: test-IO/agentic-qa-github-action@v1
+    with:
+      host: ${{ vars.AGENTIC_QA_HOST }}
+      token: ${{ secrets.AGENTIC_QA_TOKEN }}
+      project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+      channel: mobile
+      product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+      check-suite-id: ${{ matrix.suite }}
+      device-platform: ${{ matrix.platform }}
+      app-binary-id: ${{ matrix.binary }}
+      session-name: ${{ matrix.name }} ${{ github.run_number }}
+      junit-path: reports/${{ matrix.name }}.xml
+```
+
+Parallel mobile runs compete for devices, so a few rules apply that web does not have:
+
+**Use `device-platform`, not `device-serial`.** Auto-selection lists the available devices and picks one at random precisely to spread concurrent sessions across the pool. A pinned serial skips that: two sessions pinning the same device both proceed to reservation, and the one that loses fails outright, because a device is held for three hours and reservation does not queue or retry.
+
+**Keep the leg count below the pool.** Selection and reservation are separate steps, so two legs can still pick the same device and one loses the race — the wider the pool, the rarer that is. Every extra `device-type`, `os-version` or `manufacturer` filter narrows the pool and makes it more likely. When nothing matches at all the step fails with `No devices available matching criteria`.
+
 Report without blocking the merge:
 
 ```yaml
