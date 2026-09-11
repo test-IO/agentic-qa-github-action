@@ -155,6 +155,61 @@ steps:
       # ...
 ```
 
+Run several check suites. Each call to the action is one session, so a matrix gives you one session per suite, all in parallel:
+
+```yaml
+strategy:
+  fail-fast: false
+  matrix:
+    include:
+      - name: smoke
+        suite: ${{ vars.AGENTIC_QA_SUITE_SMOKE }}
+      - name: checkout
+        suite: ${{ vars.AGENTIC_QA_SUITE_CHECKOUT }}
+steps:
+  - uses: test-IO/agentic-qa-github-action@v1
+    with:
+      host: ${{ vars.AGENTIC_QA_HOST }}
+      token: ${{ secrets.AGENTIC_QA_TOKEN }}
+      project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+      check-suite-id: ${{ matrix.suite }}
+      url: https://staging.example.com
+      session-name: ${{ matrix.name }} ${{ github.run_number }}
+      junit-path: reports/${{ matrix.name }}.xml
+
+  - if: always()
+    uses: actions/upload-artifact@v4
+    with:
+      name: agentic-qa-${{ matrix.name }}
+      path: reports/${{ matrix.name }}.xml
+```
+
+Name the sessions yourself. The default name is the workflow, the short SHA and the run number, which is the same string for every session in one run, so without `session-name` they are indistinguishable in the UI. The artifact name has to differ per leg too — `upload-artifact@v4` rejects duplicates. Job outputs do not survive a matrix, since GitHub overwrites them leg by leg, so collect the JUnit files as artifacts instead of reading `steps.*.outputs` from a later job.
+
+To run the suites one after another in a single job, give every step its own `id`, `session-name` and `junit-path`:
+
+```yaml
+steps:
+  - uses: test-IO/agentic-qa-github-action@v1
+    id: smoke
+    with:
+      check-suite-id: ${{ vars.AGENTIC_QA_SUITE_SMOKE }}
+      session-name: smoke ${{ github.run_number }}
+      junit-path: reports/smoke.xml
+      # host, token, project-id, url ...
+
+  - if: always()
+    uses: test-IO/agentic-qa-github-action@v1
+    id: checkout
+    with:
+      check-suite-id: ${{ vars.AGENTIC_QA_SUITE_CHECKOUT }}
+      session-name: checkout ${{ github.run_number }}
+      junit-path: reports/checkout.xml
+      # ...
+```
+
+The `if: always()` matters here: the action exits non-zero when checks fail, so without it a failing suite skips every suite after it. The distinct `id` is what lets you read one session's outputs, as in `${{ steps.smoke.outputs.checks-failed }}`.
+
 Report without blocking the merge:
 
 ```yaml
