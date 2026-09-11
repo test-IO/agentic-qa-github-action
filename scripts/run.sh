@@ -27,6 +27,18 @@ echo "::add-mask::$AQ_TOKEN"
 : "${AQ_TIMEOUT_SECONDS:=1800}"
 : "${AQ_POLL_INTERVAL_SECONDS:=15}"
 : "${AQ_JUNIT_PATH:=}"
+: "${AQ_CHANNEL:=web}"
+: "${AQ_PRODUCT_ID:=}"
+: "${AQ_DEVICE_SERIAL:=}"
+: "${AQ_DEVICE_PLATFORM:=}"
+: "${AQ_DEVICE_TYPE:=}"
+: "${AQ_OS_VERSION:=}"
+: "${AQ_MANUFACTURER:=}"
+: "${AQ_DEVICE_BACKEND:=}"
+: "${AQ_APP_BINARY_ID:=}"
+: "${AQ_APP_PACKAGE:=}"
+: "${AQ_MOBILE_BROWSER:=false}"
+: "${AQ_PREREQUISITES:=}"
 
 HOST="${AQ_HOST%/}"
 
@@ -59,7 +71,13 @@ api() {
 
 api_error() {
   local msg
-  msg=$(jq -r '.error // empty' <<<"$API_BODY" 2>/dev/null || true)
+  # .error is a string for plain failures and an attribute => messages object for
+  # validation failures; flatten the object so the second kind stays readable.
+  msg=$(jq -r '
+    (.error // empty)
+    | if   type == "object" then [to_entries[] | "\(.key): \(.value | if type == "array" then join(", ") else tostring end)"] | join("; ")
+      elif type == "array"  then join("; ")
+      else tostring end' <<<"$API_BODY" 2>/dev/null || true)
   if [[ -n "$msg" ]]; then
     printf '%s' "$msg"
   else
@@ -75,8 +93,51 @@ case "$API_STATUS" in
   *)   die "token check failed: $(api_error)" ;;
 esac
 
-if [[ -z "$AQ_URL" && -z "$AQ_ENVIRONMENT_ID" ]]; then
-  die "either url or environment-id must be set."
+AQ_CHANNEL="${AQ_CHANNEL,,}"
+case "$AQ_CHANNEL" in
+  web|mobile) ;;
+  *) die "channel must be web or mobile, not '$AQ_CHANNEL'." ;;
+esac
+
+if [[ "$AQ_CHANNEL" == "web" ]]; then
+  if [[ -z "$AQ_URL" && -z "$AQ_ENVIRONMENT_ID" ]]; then
+    die "either url or environment-id must be set."
+  fi
+else
+  [[ -n "$AQ_PRODUCT_ID" ]] || die "product-id is required when channel is mobile. It must be a mobile product."
+
+  # WHERE the run happens. The API takes a pinned serial or search criteria, and
+  # a serial wins when both are sent.
+  if [[ -z "$AQ_DEVICE_SERIAL" && -z "$AQ_DEVICE_PLATFORM" ]]; then
+    die "mobile needs a device: set device-serial, or device-platform to auto-select one."
+  fi
+
+  # WHAT runs on it. The API defaults an unspecified source to "binary" and only
+  # notices the missing upload when the session starts, which would leave an
+  # unstartable session behind, so settle it before anything is created.
+  sources=0
+  if is_true "$AQ_MOBILE_BROWSER";   then sources=$((sources + 1)); fi
+  if [[ -n "$AQ_APP_PACKAGE"   ]];   then sources=$((sources + 1)); fi
+  if [[ -n "$AQ_APP_BINARY_ID" ]];   then sources=$((sources + 1)); fi
+  if (( sources == 0 )); then
+    die "mobile needs an app source: set one of app-binary-id, app-package or mobile-browser."
+  fi
+  if (( sources > 1 )); then
+    die "set only one app source out of app-binary-id, app-package and mobile-browser."
+  fi
+  if [[ -n "$AQ_APP_PACKAGE" && -z "$AQ_DEVICE_SERIAL" ]]; then
+    die "app-package runs an app already installed on one device, so it needs device-serial."
+  fi
+
+  ignored_on_mobile() {
+    echo "::warning::$1 is a web input and is ignored when channel is mobile."
+  }
+  for pair in "url:$AQ_URL" "environment-id:$AQ_ENVIRONMENT_ID" \
+              "browser-type:$AQ_BROWSER_TYPE" "viewport:$AQ_VIEWPORT"; do
+    if [[ -n "${pair#*:}" ]]; then ignored_on_mobile "${pair%%:*}"; fi
+  done
+  if is_true "$AQ_USE_REPLAYS"; then ignored_on_mobile use-replays; fi
+  if [[ "$AQ_WORKFLOW_TYPE" != "web" ]]; then ignored_on_mobile workflow-type; fi
 fi
 
 session_name="$AQ_SESSION_NAME"
@@ -93,26 +154,64 @@ if [[ -z "$session_name" ]]; then
   fi
 fi
 
-if is_true "$AQ_USE_REPLAYS"; then replays_json=true; else replays_json=false; fi
+if [[ "$AQ_CHANNEL" == "mobile" ]]; then
+  if is_true "$AQ_MOBILE_BROWSER"; then browser_json=true; else browser_json=false; fi
+  create_path="/api/v1/projects/$AQ_PROJECT_ID/mobile/test_sessions"
+  payload=$(jq -n \
+    --arg name "$session_name" \
+    --arg suite "$AQ_CHECK_SUITE_ID" \
+    --arg product "$AQ_PRODUCT_ID" \
+    --arg backend "$AQ_DEVICE_BACKEND" \
+    --arg serial "$AQ_DEVICE_SERIAL" \
+    --arg platform "$AQ_DEVICE_PLATFORM" \
+    --arg dtype "$AQ_DEVICE_TYPE" \
+    --arg osver "$AQ_OS_VERSION" \
+    --arg vendor "$AQ_MANUFACTURER" \
+    --arg artifact "$AQ_APP_BINARY_ID" \
+    --arg package "$AQ_APP_PACKAGE" \
+    --arg prereq "$AQ_PREREQUISITES" \
+    --argjson browser "$browser_json" '
+    {test_session: (
+      {name: $name, check_suite_id: $suite, product_id: $product}
+      + (if $backend  != "" then {device_backend: $backend} else {} end)
+      + (if $serial   != "" then {device_serial: $serial}   else {} end)
+      # the server ignores search criteria once a serial is pinned, so only send
+      # the axis that will actually be used
+      + (if $serial == "" and $platform != "" then
+           {search_criteria: (
+             {platform: $platform}
+             + (if $dtype  != "" then {device_type: $dtype}    else {} end)
+             + (if $osver  != "" then {os_version: $osver}     else {} end)
+             + (if $vendor != "" then {manufacturer: $vendor}  else {} end)
+           )}
+         else {} end)
+      + (if $artifact != "" then {selected_artifact_id: $artifact} else {} end)
+      + (if $package  != "" then {app_package: $package}          else {} end)
+      + (if $browser        then {mobile_browser: true}           else {} end)
+      + (if $prereq   != "" then {prerequisites: $prereq}         else {} end)
+    )}')
+else
+  if is_true "$AQ_USE_REPLAYS"; then replays_json=true; else replays_json=false; fi
+  create_path="/api/v1/projects/$AQ_PROJECT_ID/test_sessions"
+  payload=$(jq -n \
+    --arg name "$session_name" \
+    --arg suite "$AQ_CHECK_SUITE_ID" \
+    --arg url "$AQ_URL" \
+    --arg env "$AQ_ENVIRONMENT_ID" \
+    --arg wtype "$AQ_WORKFLOW_TYPE" \
+    --arg browser "$AQ_BROWSER_TYPE" \
+    --arg viewport "$AQ_VIEWPORT" \
+    --argjson replays "$replays_json" '
+    {test_session: (
+      {name: $name, check_suite_id: $suite, use_replays: $replays, workflow_type: $wtype}
+      + (if $url  != "" then {test_urls: [$url]}    else {} end)
+      + (if $env  != "" then {environment_id: $env} else {} end)
+      + (if $browser  != "" then {browser_type: $browser} else {} end)
+      + (if $viewport != "" then {viewport: $viewport}    else {} end)
+    )}')
+fi
 
-payload=$(jq -n \
-  --arg name "$session_name" \
-  --arg suite "$AQ_CHECK_SUITE_ID" \
-  --arg url "$AQ_URL" \
-  --arg env "$AQ_ENVIRONMENT_ID" \
-  --arg wtype "$AQ_WORKFLOW_TYPE" \
-  --arg browser "$AQ_BROWSER_TYPE" \
-  --arg viewport "$AQ_VIEWPORT" \
-  --argjson replays "$replays_json" '
-  {test_session: (
-    {name: $name, check_suite_id: $suite, use_replays: $replays, workflow_type: $wtype}
-    + (if $url  != "" then {test_urls: [$url]}  else {} end)
-    + (if $env  != "" then {environment_id: $env} else {} end)
-    + (if $browser  != "" then {browser_type: $browser} else {} end)
-    + (if $viewport != "" then {viewport: $viewport}    else {} end)
-  )}')
-
-api POST "/api/v1/projects/$AQ_PROJECT_ID/test_sessions" "$payload"
+api POST "$create_path" "$payload"
 if [[ "$API_STATUS" == "503" ]]; then
   die "$(api_error)"
 elif [[ "$API_STATUS" != "201" ]]; then

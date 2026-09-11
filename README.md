@@ -14,6 +14,8 @@ The action creates a test session on your installation, starts it, waits for it 
     url: https://staging.example.com
 ```
 
+It runs a web suite against a URL by default. Set `channel: mobile` to run a mobile suite on a real device instead — see [Mobile runs](#mobile-runs).
+
 Agentic QA is single-tenant: every customer runs their own installation, so `host` is always yours.
 
 ## Setup
@@ -22,12 +24,23 @@ Agentic QA is single-tenant: every customer runs their own installation, so `hos
 
 **2. Mint a token.** In the Agentic QA UI, go to **System Configuration → API / MCP Config**, create a token, and click **Show API Config**. Leave *destructive actions* off; CI never needs it. Only admins can create tokens.
 
-**3. Find the IDs.** Both are UUIDs from your installation:
+**3. Find the IDs.** These are UUIDs from your installation:
 
 ```bash
 curl -s "$HOST/api/v1/projects" -H "Authorization: ApiKey $TOKEN" | jq '.projects[] | {id, name}'
 curl -s "$HOST/api/v1/projects/$PROJECT_ID/check_suites" -H "Authorization: ApiKey $TOKEN" | jq '.check_suites[] | {id, name}'
 ```
+
+For a mobile run you also need the product, and the binary if you install one:
+
+```bash
+curl -s "$HOST/api/v1/products" -H "Authorization: ApiKey $TOKEN" \
+  | jq '.products[] | select(.product_type == "mobile") | {id, name}'
+curl -s "$HOST/api/v1/products/$PRODUCT_ID/mobile_binary_files" -H "Authorization: ApiKey $TOKEN" \
+  | jq '.mobile_binary_files[] | {id, filename, platform}'
+```
+
+Listing binaries needs an owner token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them.
 
 **4. Store the settings on the repository.** The token goes in a secret so it is masked in logs; the rest go in variables so you can read them while debugging.
 
@@ -74,25 +87,65 @@ Leaving `--body` off the secret makes `gh` prompt for the value, so it never lan
 
 ## Inputs
 
+Both channels take these:
+
 | Name | Required | Default | Description |
 |---|---|---|---|
 | `host` | yes | | Base URL of your installation |
 | `token` | yes | | API token |
 | `project-id` | yes | | Project UUID |
 | `check-suite-id` | yes | | Check suite UUID |
-| `url` | | | URL to test. Required unless `environment-id` is set |
-| `environment-id` | | | Environment whose URL is the target. Ignored when `url` is set |
+| `channel` | | `web` | `web` or `mobile` |
 | `session-name` | | workflow name, short SHA and run number | Display name for the session |
-| `workflow-type` | | `web` | `web`, `accessibility`, or `localization` |
-| `browser-type` | | installation default | e.g. `chrome` |
-| `viewport` | | installation default | e.g. `1280x800` |
-| `use-replays` | | `false` | Replay the latest recording per check instead of fresh AI execution |
 | `await-completion` | | `true` | Wait for results. `false` starts the run and exits |
 | `continue-on-failure` | | `false` | Report results but always exit 0 |
 | `fail-on-blocked` | | `true` | Treat blocked checks as failures |
 | `timeout-seconds` | | `1800` | How long to wait |
 | `poll-interval-seconds` | | `15` | Seconds between status polls |
 | `junit-path` | | | Write a JUnit XML report here |
+
+### Web only
+
+| Name | Required | Default | Description |
+|---|---|---|---|
+| `url` | | | URL to test. Required unless `environment-id` is set |
+| `environment-id` | | | Environment whose URL is the target. Ignored when `url` is set |
+| `workflow-type` | | `web` | `web`, `accessibility`, or `localization` |
+| `browser-type` | | installation default | e.g. `chrome` |
+| `viewport` | | installation default | e.g. `1280x800` |
+| `use-replays` | | `false` | Replay the latest recording per check instead of fresh AI execution |
+
+### Mobile only
+
+| Name | Required | Default | Description |
+|---|---|---|---|
+| `product-id` | for mobile | | Mobile product UUID |
+| `device-serial` | | | Run on this exact device, by UDID/serial |
+| `device-platform` | | | Auto-select a device for this platform, e.g. `android` or `ios` |
+| `device-type` | | | Narrows auto-selection, e.g. `phone` or `tablet` |
+| `os-version` | | | Narrows auto-selection to this OS version |
+| `manufacturer` | | | Narrows auto-selection to this manufacturer |
+| `device-backend` | | `mobitru` | Device provider |
+| `app-binary-id` | | | UUID of an uploaded binary to install before the run |
+| `app-package` | | | Package name (Android) or Bundle ID (iOS) of an app already on the device |
+| `mobile-browser` | | `false` | Test the device browser instead of an app |
+| `prerequisites` | | | Free-form setup notes to run before the checks, e.g. login steps |
+
+Setting a web input on a mobile run logs a warning and changes nothing — the mobile API takes no URL, browser, viewport, workflow type or replay flag.
+
+## Mobile runs
+
+A mobile run needs `channel: mobile`, a `product-id` for a mobile product, and two independent choices.
+
+**Which device.** Either `device-serial` for one exact device, or `device-platform` to let the installation pick one — narrow that with `device-type`, `os-version` and `manufacturer`. If you set both, the serial wins and the criteria are dropped.
+
+**What runs on it.** Exactly one of:
+
+- `app-binary-id` — install an uploaded APK or IPA first.
+- `app-package` — an app already installed on the device. Needs `device-serial`, since it has to be a device you picked.
+- `mobile-browser: true` — the device's own browser. Nothing is installed.
+
+The action rejects zero sources and more than one. The API treats an unset source as "install a binary" and only notices the missing upload at start time, which would leave you a session that cannot run, so it is settled before anything is created.
 
 ## Outputs
 
@@ -210,6 +263,62 @@ steps:
 
 The `if: always()` matters here: the action exits non-zero when checks fail, so without it a failing suite skips every suite after it. The distinct `id` is what lets you read one session's outputs, as in `${{ steps.smoke.outputs.checks-failed }}`.
 
+Run a mobile suite on an auto-selected Android phone, installing a binary:
+
+```yaml
+- uses: test-IO/agentic-qa-github-action@v1
+  with:
+    host: ${{ vars.AGENTIC_QA_HOST }}
+    token: ${{ secrets.AGENTIC_QA_TOKEN }}
+    project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+    check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+    channel: mobile
+    product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+    device-platform: android
+    device-type: phone
+    app-binary-id: ${{ vars.AGENTIC_QA_APP_BINARY }}
+```
+
+Or on one pinned device, against an app that is already installed:
+
+```yaml
+- uses: test-IO/agentic-qa-github-action@v1
+  with:
+    channel: mobile
+    product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+    device-serial: R5CT10ABCDE
+    app-package: com.example.app
+    # host, token, project-id, check-suite-id ...
+```
+
+Web and mobile side by side. They need different inputs, so give each its own job rather than one matrix:
+
+```yaml
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: test-IO/agentic-qa-github-action@v1
+        with:
+          check-suite-id: ${{ vars.AGENTIC_QA_SUITE }}
+          url: https://staging.example.com
+          # host, token, project-id ...
+
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: test-IO/agentic-qa-github-action@v1
+        with:
+          channel: mobile
+          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+          device-platform: ios
+          mobile-browser: true
+          # host, token, project-id ...
+```
+
+A check suite belongs to one product, and a product is either web or mobile, so the suite decides the channel — you cannot point a web suite at `channel: mobile` or the reverse.
+
 Report without blocking the merge:
 
 ```yaml
@@ -234,6 +343,10 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 **Timeouts leave the session running.** The API has no cancel endpoint, so if `timeout-seconds` is reached the action gives up but the run continues on the server. Stop it from the UI using the `session-url` output.
 
+**Listing app binaries needs an owner token.** `GET /products/:id/mobile_binary_files` is owner-only, though `app-binary-id` works with any token that can reach the product. Look the ID up once and store it as a repository variable.
+
+**There is no device-location filter.** The API documents `search_criteria[location]` for picking a datacenter, but does not accept it, so the action does not offer it. Pin a `device-serial` if you need a specific device.
+
 **Private installations need a reachable host.** GitHub-hosted runners must be able to open an HTTPS connection to `host`. If your installation sits behind a firewall or VPN, use a self-hosted runner.
 
 **Requirements.** `bash`, `curl` and `jq`. All are present on GitHub-hosted runners.
@@ -244,7 +357,9 @@ Fire and forget, for a nightly run you inspect in the UI:
 tests/run_tests.sh
 ```
 
-The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, expired tokens, JUnit output and escaping, and the request body sent to the API.
+The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, expired tokens, JUnit output and escaping, both channels' request bodies, and the mobile input validation.
+
+`scripts/run.sh` uses bash 4 parameter expansion, so run the tests with bash 4 or newer. That is what GitHub-hosted runners have; macOS ships bash 3.2, where you need `brew install bash` and `/opt/homebrew/bin/bash tests/run_tests.sh`.
 
 ## Licence
 

@@ -1,5 +1,5 @@
 name: 'Agentic QA'
-description: 'Run an Agentic QA check suite against a URL and fail the build when checks fail.'
+description: 'Run an Agentic QA check suite against a URL or a mobile device and fail the build when checks fail.'
 author: 'test-io'
 
 branding:
@@ -19,8 +19,13 @@ inputs:
   check-suite-id:
     description: 'UUID of the check suite to run.'
     required: true
+  channel:
+    description: 'web or mobile. Mobile runs on a device and needs product-id plus a device and an app source.'
+    required: false
+    default: 'web'
+
   url:
-    description: 'URL to test. Required unless environment-id is set.'
+    description: 'URL to test (web only). Required unless environment-id is set.'
     required: false
     default: ''
   environment-id:
@@ -67,6 +72,51 @@ inputs:
     description: 'Seconds between status polls.'
     required: false
     default: '15'
+  product-id:
+    description: 'UUID of the mobile product. Required when channel is mobile.'
+    required: false
+    default: ''
+  device-serial:
+    description: 'Run on this exact device, by UDID/serial. Either this or device-platform is required for mobile.'
+    required: false
+    default: ''
+  device-platform:
+    description: 'Auto-select a device for this platform, e.g. android or ios. Ignored when device-serial is set.'
+    required: false
+    default: ''
+  device-type:
+    description: 'Narrows auto-selection, e.g. phone or tablet.'
+    required: false
+    default: ''
+  os-version:
+    description: 'Narrows auto-selection to this OS version.'
+    required: false
+    default: ''
+  manufacturer:
+    description: 'Narrows auto-selection to this manufacturer.'
+    required: false
+    default: ''
+  device-backend:
+    description: 'Device provider. Defaults to the installation default (mobitru).'
+    required: false
+    default: ''
+  app-binary-id:
+    description: 'UUID of an uploaded app binary to install before the run. One app source is required for mobile.'
+    required: false
+    default: ''
+  app-package:
+    description: 'Run an app already on the device, by package name (Android) or Bundle ID (iOS). Needs device-serial.'
+    required: false
+    default: ''
+  mobile-browser:
+    description: 'Test the device browser instead of an app. Installs nothing.'
+    required: false
+    default: 'false'
+  prerequisites:
+    description: 'Free-form setup notes to run before the checks, e.g. login steps (mobile only).'
+    required: false
+    default: ''
+
   junit-path:
     description: 'Write a JUnit XML report to this path. Empty disables it.'
     required: false
@@ -119,3 +169,15 @@ runs:
         AQ_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
         AQ_POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
         AQ_JUNIT_PATH: ${{ inputs.junit-path }}
+        AQ_CHANNEL: ${{ inputs.channel }}
+        AQ_PRODUCT_ID: ${{ inputs.product-id }}
+        AQ_DEVICE_SERIAL: ${{ inputs.device-serial }}
+        AQ_DEVICE_PLATFORM: ${{ inputs.device-platform }}
+        AQ_DEVICE_TYPE: ${{ inputs.device-type }}
+        AQ_OS_VERSION: ${{ inputs.os-version }}
+        AQ_MANUFACTURER: ${{ inputs.manufacturer }}
+        AQ_DEVICE_BACKEND: ${{ inputs.device-backend }}
+        AQ_APP_BINARY_ID: ${{ inputs.app-binary-id }}
+        AQ_APP_PACKAGE: ${{ inputs.app-package }}
+        AQ_MOBILE_BROWSER: ${{ inputs.mobile-browser }}
+        AQ_PREREQUISITES: ${{ inputs.prerequisites }}

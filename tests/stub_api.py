@@ -66,6 +66,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"test_session": {"id": "sess-1", "status": "started"}})
         with open(os.path.join(WORK, "payload.json"), "w") as handle:
             json.dump(body, handle, indent=2)
+        with open(os.path.join(WORK, "create_path"), "w") as handle:
+            handle.write(self.path)
+        if MODE == "validation":
+            return self.reply(422, {"error": {"device_serial": ["is not a known device"]}})
         return self.reply(201, {"test_session": {"id": "sess-1", "status": "created"}})
 
 

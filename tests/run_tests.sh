@@ -36,6 +36,9 @@ run_action() {
     AQ_USE_REPLAYS="false" AQ_AWAIT_COMPLETION="true" AQ_CONTINUE_ON_FAILURE="false" \
     AQ_FAIL_ON_BLOCKED="true" AQ_TIMEOUT_SECONDS="60" AQ_POLL_INTERVAL_SECONDS="1" \
     AQ_JUNIT_PATH="$WORK/report.xml" \
+    AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM="" \
+    AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND="" \
+    AQ_APP_BINARY_ID="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
     "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
   # shellcheck disable=SC2319  # $? is the run above; `local rc` would reset it
   local rc=$?
@@ -89,6 +92,58 @@ run_action mixed 1 "rejects a missing url and environment-id" AQ_URL=
 run_action mixed 1 "times out instead of hanging" AQ_TIMEOUT_SECONDS=0
 run_action expired 1 "reports an expired token"
 run_action empty 1 "fails when the suite produced no checks"
+
+# --- mobile channel ---
+
+MOBILE_BASE=(AQ_CHANNEL=mobile AQ_PRODUCT_ID=prod-1 AQ_URL= AQ_BROWSER_TYPE= AQ_VIEWPORT=)
+
+run_action green 0 "runs a mobile session on a pinned device" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_ID=bin-1
+assert_file_has "$WORK/create_path" "/mobile/test_sessions" "posts to the mobile endpoint"
+assert_file_has "$WORK/payload.json" '"product_id": "prod-1"'         "sends product_id"
+assert_file_has "$WORK/payload.json" '"device_serial": "ABC123"'      "sends the pinned serial"
+assert_file_has "$WORK/payload.json" '"selected_artifact_id": "bin-1"' "sends the binary id"
+
+run_action green 0 "runs a mobile session on an auto-selected device" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_DEVICE_TYPE=phone AQ_OS_VERSION=14 \
+  AQ_MANUFACTURER=Google AQ_MOBILE_BROWSER=true AQ_PREREQUISITES="log in first"
+assert_file_has "$WORK/payload.json" '"platform": "android"'     "sends the search platform"
+assert_file_has "$WORK/payload.json" '"device_type": "phone"'    "sends the device type"
+assert_file_has "$WORK/payload.json" '"os_version": "14"'        "sends the os version"
+assert_file_has "$WORK/payload.json" '"manufacturer": "Google"'  "sends the manufacturer"
+assert_file_has "$WORK/payload.json" '"mobile_browser": true'    "sends mobile_browser"
+assert_file_has "$WORK/payload.json" '"prerequisites": "log in first"' "sends prerequisites"
+
+run_action green 0 "drops search criteria when a serial is pinned" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_DEVICE_PLATFORM=android AQ_MOBILE_BROWSER=true
+if grep -qF 'search_criteria' "$WORK/payload.json"; then
+  echo "FAIL sends no search_criteria alongside a serial"
+  fail=$((fail + 1))
+else
+  echo "ok   sends no search_criteria alongside a serial"
+  pass=$((pass + 1))
+fi
+
+run_action green 0 "warns about web-only inputs on mobile" \
+  AQ_CHANNEL=mobile AQ_PRODUCT_ID=prod-1 AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true
+assert_file_has "$WORK/log" "::warning::url is a web input" "warns that url is ignored on mobile"
+assert_file_has "$WORK/log" "::warning::viewport is a web input" "warns that viewport is ignored on mobile"
+
+run_action green 1 "rejects mobile without product-id" \
+  AQ_CHANNEL=mobile AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true
+run_action green 1 "rejects mobile without a device" \
+  "${MOBILE_BASE[@]}" AQ_MOBILE_BROWSER=true
+run_action green 1 "rejects mobile without an app source" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123
+run_action green 1 "rejects two app sources" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true AQ_APP_BINARY_ID=bin-1
+run_action green 1 "rejects app-package without a serial" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_APP_PACKAGE=com.example.app
+run_action green 1 "rejects an unknown channel" AQ_CHANNEL=desktop
+
+run_action validation 1 "surfaces a validation error from the API" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true
+assert_file_has "$WORK/log" "device_serial: is not a known device" "flattens a validation error object"
 
 echo
 echo "$pass passed, $fail failed"
