@@ -48,6 +48,10 @@ inputs:
     description: 'Viewport override, e.g. 1280x800.'
     required: false
     default: ''
+  proxy-config-id:
+    description: 'UUID of a proxy config to route browser traffic through. Web only; list them at /api/v1/proxy_configs.'
+    required: false
+    default: ''
   use-replays:
     description: 'Replay the latest recording per check instead of running fresh AI execution.'
     required: false
@@ -162,6 +166,7 @@ runs:
         AQ_WORKFLOW_TYPE: ${{ inputs.workflow-type }}
         AQ_BROWSER_TYPE: ${{ inputs.browser-type }}
         AQ_VIEWPORT: ${{ inputs.viewport }}
+        AQ_PROXY_CONFIG_ID: ${{ inputs.proxy-config-id }}
         AQ_USE_REPLAYS: ${{ inputs.use-replays }}
         AQ_AWAIT_COMPLETION: ${{ inputs.await-completion }}
         AQ_CONTINUE_ON_FAILURE: ${{ inputs.continue-on-failure }}

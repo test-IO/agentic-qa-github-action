@@ -27,6 +27,7 @@ echo "::add-mask::$AQ_TOKEN"
 : "${AQ_TIMEOUT_SECONDS:=1800}"
 : "${AQ_POLL_INTERVAL_SECONDS:=15}"
 : "${AQ_JUNIT_PATH:=}"
+: "${AQ_PROXY_CONFIG_ID:=}"
 : "${AQ_CHANNEL:=web}"
 : "${AQ_PRODUCT_ID:=}"
 : "${AQ_DEVICE_SERIAL:=}"
@@ -103,6 +104,21 @@ if [[ "$AQ_CHANNEL" == "web" ]]; then
   if [[ -z "$AQ_URL" && -z "$AQ_ENVIRONMENT_ID" ]]; then
     die "either url or environment-id must be set."
   fi
+
+  # An id that matches nothing is accepted all the way down: there is no foreign
+  # key on it, and the runner logs a warning and runs unproxied. That turns a
+  # typo into a green build that never used the proxy, so check it here.
+  if [[ -n "$AQ_PROXY_CONFIG_ID" ]]; then
+    api GET "/api/v1/proxy_configs"
+    [[ "$API_STATUS" == "200" ]] || die "could not list proxy configs: $(api_error)"
+    if ! jq -e --arg id "$AQ_PROXY_CONFIG_ID" 'any(.proxy_configs[]; .id == $id)' >/dev/null <<<"$API_BODY"; then
+      available=$(jq -r '[.proxy_configs[] | "\(.name) (\(.id))"] | join(", ")' <<<"$API_BODY")
+      if [[ -n "$available" ]]; then
+        die "proxy-config-id '$AQ_PROXY_CONFIG_ID' is not configured here. Available: $available"
+      fi
+      die "proxy-config-id '$AQ_PROXY_CONFIG_ID' is not configured here, and this installation has no proxy configs. Add one under System Configuration."
+    fi
+  fi
 else
   [[ -n "$AQ_PRODUCT_ID" ]] || die "product-id is required when channel is mobile. It must be a mobile product."
 
@@ -133,7 +149,8 @@ else
     echo "::warning::$1 is a web input and is ignored when channel is mobile."
   }
   for pair in "url:$AQ_URL" "environment-id:$AQ_ENVIRONMENT_ID" \
-              "browser-type:$AQ_BROWSER_TYPE" "viewport:$AQ_VIEWPORT"; do
+              "browser-type:$AQ_BROWSER_TYPE" "viewport:$AQ_VIEWPORT" \
+              "proxy-config-id:$AQ_PROXY_CONFIG_ID"; do
     if [[ -n "${pair#*:}" ]]; then ignored_on_mobile "${pair%%:*}"; fi
   done
   if is_true "$AQ_USE_REPLAYS"; then ignored_on_mobile use-replays; fi
@@ -201,6 +218,7 @@ else
     --arg wtype "$AQ_WORKFLOW_TYPE" \
     --arg browser "$AQ_BROWSER_TYPE" \
     --arg viewport "$AQ_VIEWPORT" \
+    --arg proxy "$AQ_PROXY_CONFIG_ID" \
     --argjson replays "$replays_json" '
     {test_session: (
       {name: $name, check_suite_id: $suite, use_replays: $replays, workflow_type: $wtype}
@@ -208,6 +226,7 @@ else
       + (if $env  != "" then {environment_id: $env} else {} end)
       + (if $browser  != "" then {browser_type: $browser} else {} end)
       + (if $viewport != "" then {viewport: $viewport}    else {} end)
+      + (if $proxy    != "" then {proxy_config_id: $proxy} else {} end)
     )}')
 fi
 

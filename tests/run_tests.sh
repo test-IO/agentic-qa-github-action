@@ -39,6 +39,7 @@ run_action() {
     AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM="" \
     AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND="" \
     AQ_APP_BINARY_ID="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
+    AQ_PROXY_CONFIG_ID="" \
     "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
   # shellcheck disable=SC2319  # $? is the run above; `local rc` would reset it
   local rc=$?
@@ -93,6 +94,17 @@ run_action mixed 1 "times out instead of hanging" AQ_TIMEOUT_SECONDS=0
 run_action expired 1 "reports an expired token"
 run_action empty 1 "fails when the suite produced no checks"
 
+# --- proxy ---
+
+run_action green 0 "sends a known proxy config" AQ_PROXY_CONFIG_ID=proxy-1
+assert_file_has "$WORK/payload.json" '"proxy_config_id": "proxy-1"' "sends proxy_config_id"
+
+run_action green 1 "rejects a proxy config the installation does not have" AQ_PROXY_CONFIG_ID=nope
+assert_file_has "$WORK/log" "Available: Corp EU (proxy-1)" "lists the proxies that do exist"
+
+run_action no_proxies 1 "rejects a proxy config when none are configured" AQ_PROXY_CONFIG_ID=proxy-1
+assert_file_has "$WORK/log" "no proxy configs" "says none are configured"
+
 # --- mobile channel ---
 
 MOBILE_BASE=(AQ_CHANNEL=mobile AQ_PRODUCT_ID=prod-1 AQ_URL= AQ_BROWSER_TYPE= AQ_VIEWPORT=)
@@ -128,6 +140,10 @@ run_action green 0 "warns about web-only inputs on mobile" \
   AQ_CHANNEL=mobile AQ_PRODUCT_ID=prod-1 AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true
 assert_file_has "$WORK/log" "::warning::url is a web input" "warns that url is ignored on mobile"
 assert_file_has "$WORK/log" "::warning::viewport is a web input" "warns that viewport is ignored on mobile"
+
+run_action green 0 "warns that proxy-config-id is ignored on mobile" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true AQ_PROXY_CONFIG_ID=proxy-1
+assert_file_has "$WORK/log" "::warning::proxy-config-id is a web input" "warns about proxy on mobile"
 
 run_action green 1 "rejects mobile without product-id" \
   AQ_CHANNEL=mobile AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true

@@ -53,6 +53,11 @@ class Handler(BaseHTTPRequestHandler):
             if MODE == "expired":
                 return self.reply(403, {"error": "Token not found or expired"})
             return self.reply(200, {"status": "ok"})
+        if self.path.endswith("/proxy_configs"):
+            proxies = [{"id": "proxy-1", "name": "Corp EU", "url": "http://proxy.example.com:3128"}]
+            if MODE == "no_proxies":
+                proxies = []
+            return self.reply(200, {"proxy_configs": proxies, "count": len(proxies)})
         if self.path.endswith("/check_executions"):
             return self.reply(200, {"check_executions": RESULTS.get(MODE, [])})
         polls["n"] += 1

@@ -42,6 +42,14 @@ curl -s "$HOST/api/v1/products/$PRODUCT_ID/mobile_binary_files" -H "Authorizatio
 
 Listing binaries needs an owner token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them.
 
+To send browser traffic through a corporate proxy, list the configured ones and take the ID:
+
+```bash
+curl -s "$HOST/api/v1/proxy_configs" -H "Authorization: ApiKey $TOKEN" | jq '.proxy_configs[]'
+```
+
+Proxies are set up in the UI under System Configuration; the API only lists them.
+
 **4. Store the settings on the repository.** The token goes in a secret so it is masked in logs; the rest go in variables so you can read them while debugging.
 
 | Name | Kind | Value |
@@ -113,6 +121,7 @@ Both channels take these:
 | `workflow-type` | | `web` | `web`, `accessibility`, or `localization` |
 | `browser-type` | | installation default | e.g. `chrome` |
 | `viewport` | | installation default | e.g. `1280x800` |
+| `proxy-config-id` | | | Route browser traffic through this proxy config |
 | `use-replays` | | `false` | Replay the latest recording per check instead of fresh AI execution |
 
 ### Mobile only
@@ -378,6 +387,10 @@ Fire and forget, for a nightly run you inspect in the UI:
 **Tokens expire after one month.** This is fixed on the platform side, and there is no renew endpoint. When a token lapses the action stops with a clear message, but someone has to mint a new one and update the secret. Put a reminder in your calendar.
 
 **Timeouts leave the session running.** The API has no cancel endpoint, so if `timeout-seconds` is reached the action gives up but the run continues on the server. Stop it from the UI using the `session-url` output.
+
+**A wrong proxy id would otherwise pass silently.** Nothing downstream rejects one: the column has no foreign key, and the runner logs `proceeding without proxy` and carries on, so the suite goes green having never used the proxy. The action checks `proxy-config-id` against the installation before creating the session and fails with the list of real ones. Sessions started from the UI or MCP still have the original behaviour.
+
+**Proxies are web only.** The mobile API takes no proxy field, so `proxy-config-id` on a mobile run warns and is dropped.
 
 **Listing app binaries needs an owner token.** `GET /products/:id/mobile_binary_files` is owner-only, though `app-binary-id` works with any token that can reach the product. Look the ID up once and store it as a repository variable.
 
