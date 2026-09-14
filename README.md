@@ -46,9 +46,14 @@ To send browser traffic through a corporate proxy, list the configured ones and 
 
 ```bash
 curl -s "$HOST/api/v1/proxy_configs" -H "Authorization: ApiKey $TOKEN" | jq '.proxy_configs[]'
+# {"id": "8f2c...", "name": "Corp EU", "url": "http://proxy.example.com:3128"}
 ```
 
-Proxies are set up in the UI under System Configuration; the API only lists them.
+Unlike binaries, this one needs no special role — the CI token can list proxies itself.
+
+Proxies are created in the UI under **System Configuration**; the API only lists them. The page does not print the UUID, so reading it there means opening a proxy for editing and taking the id out of the URL (`/admin/proxy_configs/<id>/edit`). The `curl` above is easier.
+
+An empty list means the installation has none yet, and nothing in the API can add one — someone with owner or engineer access has to create it first.
 
 **4. Store the settings on the repository.** The token goes in a secret so it is masked in logs; the rest go in variables so you can read them while debugging.
 
@@ -76,6 +81,8 @@ For the **secret**:
 2. Click **New repository secret**.
 3. Fill in **Name** and **Secret**.
 4. Click **Add secret**.
+
+Store the optional IDs the same way when you use them — `AGENTIC_QA_PROXY` for a proxy config, `AGENTIC_QA_MOBILE_PRODUCT` and `AGENTIC_QA_APP_BINARY` for a mobile run. They are ordinary variables; only the token needs to be a secret.
 
 A secret cannot be read back afterwards — you can only overwrite it. Variable names accept letters, digits and underscores, must not start with a digit or with `GITHUB_`, and are matched case-insensitively.
 
