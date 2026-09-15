@@ -61,7 +61,7 @@ inputs:
     required: false
     default: 'true'
   continue-on-failure:
-    description: 'Report results but always exit 0.'
+    description: 'Report failing and blocked checks but always exit 0. Does not cover an incomplete result set — a timeout or results that never settle still fail the build.'
     required: false
     default: 'false'
   fail-on-blocked:
@@ -69,9 +69,9 @@ inputs:
     required: false
     default: 'true'
   timeout-seconds:
-    description: 'How long to wait for the session to finish.'
+    description: 'How long to wait for the session to finish. Checks run only a few at a time, so budget for the whole suite — a 23-check web suite takes about an hour. Too low and the action gives up mid-run.'
     required: false
-    default: '1800'
+    default: '7200'
   poll-interval-seconds:
     description: 'Seconds between status polls.'
     required: false

@@ -113,9 +113,9 @@ Both channels take these:
 | `channel` | | `web` | `web` or `mobile` |
 | `session-name` | | workflow name, short SHA and run number | Display name for the session |
 | `await-completion` | | `true` | Wait for results. `false` starts the run and exits |
-| `continue-on-failure` | | `false` | Report results but always exit 0 |
+| `continue-on-failure` | | `false` | Report failing and blocked checks but always exit 0. Does not cover an incomplete result set |
 | `fail-on-blocked` | | `true` | Treat blocked checks as failures |
-| `timeout-seconds` | | `1800` | How long to wait |
+| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole suite — a 23-check web suite takes about an hour |
 | `poll-interval-seconds` | | `15` | Seconds between status polls |
 | `results-settle-seconds` | | `60` | How long to re-read results after the session finishes, until the set stops changing |
 | `junit-path` | | | Write a JUnit XML report here |
@@ -178,7 +178,9 @@ The action rejects zero sources and more than one. The API treats an unset sourc
 
 The action does not trust the first read of the results. A session's status is derived from its workflow executions alone, so it can report `completed` while check executions are still being written — one read then presents a partial run as final. After the session finishes the action re-reads the results until the total stops changing and no check is still running, for up to `results-settle-seconds`.
 
-If the set never settles, the action fails rather than reporting the smaller numbers, because a report that quietly loses blocked checks is worse than no report. The same applies when a check never reaches a final state. `continue-on-failure` still overrides both.
+Settling only applies once the session is terminal. A session that is still running has lulls — the gap between one check ending and the next being created leaves the set briefly stable with nothing running — so a run the action gave up on is treated as partial outright, never as settled.
+
+If the set never settles, the action fails rather than reporting the smaller numbers, because a report that quietly loses blocked checks is worse than no report. The same applies when a check never reaches a final state, and when `timeout-seconds` runs out. `continue-on-failure` does **not** override these: it suppresses failing and blocked checks, not a result set we already know is incomplete. The job summary carries the same warning, so a partial table cannot be mistaken for a result.
 
 Each check ends in one of three states:
 
@@ -398,7 +400,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 **Tokens expire after one month.** This is fixed on the platform side, and there is no renew endpoint. When a token lapses the action stops with a clear message, but someone has to mint a new one and update the secret. Put a reminder in your calendar.
 
-**Timeouts leave the session running.** The API has no cancel endpoint, so if `timeout-seconds` is reached the action gives up but the run continues on the server. Stop it from the UI using the `session-url` output.
+**Timeouts leave the session running.** The API has no cancel endpoint, so if `timeout-seconds` is reached the action gives up but the run continues on the server. Stop it from the UI using the `session-url` output. A timeout always fails the build, because the counts at that point cover only the checks that had been created so far.
 
 **Under-counted results used to pass silently.** A suite of 23 checks was once reported as 5, hiding 18 blocked checks behind a green build, because the results were read once the moment the session went `completed`. Hence the settling described under [Check results](#check-results). If you see `results still arriving` in the log, that guard is doing its job.
 

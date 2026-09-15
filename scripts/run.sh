@@ -24,7 +24,7 @@ echo "::add-mask::$AQ_TOKEN"
 : "${AQ_AWAIT_COMPLETION:=true}"
 : "${AQ_CONTINUE_ON_FAILURE:=false}"
 : "${AQ_FAIL_ON_BLOCKED:=true}"
-: "${AQ_TIMEOUT_SECONDS:=1800}"
+: "${AQ_TIMEOUT_SECONDS:=7200}"
 : "${AQ_POLL_INTERVAL_SECONDS:=15}"
 : "${AQ_JUNIT_PATH:=}"
 : "${AQ_PROXY_CONFIG_ID:=}"
@@ -299,29 +299,40 @@ read_results() {
 # terminal while check executions are still being written — one read then reports a
 # partial run as final (a suite of 23 was once reported as 5, with 18 blocked checks
 # missing). Re-read until the set stops growing and nothing is still running.
-settle_deadline=$(( SECONDS + AQ_RESULTS_SETTLE_SECONDS ))
-settle_interval=1
-prev_total=-1
+#
+# Only a terminal session can settle. A running one has lulls — the gap between one
+# check ending and the next being created leaves the set briefly stable with nothing
+# running — and mistaking a lull for the end is how a 23-check suite gets reported as
+# the 14 that happened to exist when we gave up waiting.
 results_settled=false
 
-while :; do
+if $timed_out; then
   read_results
   total=$(jq '.check_executions | length' <<<"$RESULTS")
-  running=$(count_state running)
+else
+  settle_deadline=$(( SECONDS + AQ_RESULTS_SETTLE_SECONDS ))
+  settle_interval=1
+  prev_total=-1
 
-  if (( total > 0 && total == prev_total && running == 0 )); then
-    results_settled=true
-    break
-  fi
-  if (( SECONDS >= settle_deadline )); then
-    break
-  fi
-  if (( prev_total >= 0 && total != prev_total )); then
-    echo "  results still arriving ($prev_total -> $total) ..."
-  fi
-  prev_total=$total
-  sleep "$settle_interval"
-done
+  while :; do
+    read_results
+    total=$(jq '.check_executions | length' <<<"$RESULTS")
+    running=$(count_state running)
+
+    if (( total > 0 && total == prev_total && running == 0 )); then
+      results_settled=true
+      break
+    fi
+    if (( SECONDS >= settle_deadline )); then
+      break
+    fi
+    if (( prev_total >= 0 && total != prev_total )); then
+      echo "  results still arriving ($prev_total -> $total) ..."
+    fi
+    prev_total=$total
+    sleep "$settle_interval"
+  done
+fi
 
 passed=$(count_state passed)
 failed=$(count_state failed)
@@ -374,6 +385,12 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo
     echo "[$session_name]($SESSION_URL)"
     echo
+    if ! $results_settled; then
+      echo "> **Incomplete — do not read these counts as the result of the run.**"
+      echo "> Checks were still arriving or still running when the action stopped"
+      echo "> reading, so a check missing below has no verdict here."
+      echo
+    fi
     echo "| | Count |"
     echo "|---|---|"
     echo "| Passed | $passed |"
@@ -394,9 +411,15 @@ fi
 
 echo "passed=$passed failed=$failed blocked=$blocked total=$total"
 
-if is_true "$AQ_CONTINUE_ON_FAILURE"; then
-  echo "continue-on-failure is set — not failing the build."
-  exit 0
+# Not knowing the result is not a result. continue-on-failure suppresses failing and
+# blocked checks; it must not suppress a set we already know is partial, or a
+# truncated run reaches the branch as a green build.
+if $timed_out; then
+  die "the session did not finish within ${AQ_TIMEOUT_SECONDS}s, so these counts cover only the $total check(s) that existed at the deadline. It is still running — the API has no cancel endpoint, so stop it in the UI: $SESSION_URL"
+fi
+
+if (( total == 0 )); then
+  die "the session finished with no check executions. Is the check suite empty? $SESSION_URL"
 fi
 
 if ! $results_settled; then
@@ -407,8 +430,9 @@ if (( accounted != total )); then
   die "$(( total - accounted )) of $total check(s) reported no final state, so the counts are incomplete. $SESSION_URL"
 fi
 
-if $timed_out; then
-  die "the session did not finish within ${AQ_TIMEOUT_SECONDS}s. It is still running — the API has no cancel endpoint, so stop it in the UI: $SESSION_URL"
+if is_true "$AQ_CONTINUE_ON_FAILURE"; then
+  echo "continue-on-failure is set — not failing the build."
+  exit 0
 fi
 
 if (( failed > 0 )); then
@@ -417,10 +441,6 @@ fi
 
 if is_true "$AQ_FAIL_ON_BLOCKED" && (( blocked > 0 )); then
   die "$blocked check(s) were blocked. Set fail-on-blocked: false to ignore these. $SESSION_URL"
-fi
-
-if (( total == 0 )); then
-  die "the session finished with no check executions. Is the check suite empty? $SESSION_URL"
 fi
 
 echo "All checks passed."

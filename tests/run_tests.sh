@@ -106,8 +106,18 @@ run_action stuck_running 1 "fails when the results never settle" AQ_RESULTS_SETT
 assert_file_has "$WORK/log" "never settled" "refuses to present a partial set as final"
 assert_file_has "$WORK/summary" "| Still running | 1 |" "shows unfinished checks in the summary"
 
-run_action stuck_running 0 "continue-on-failure still wins over an unsettled set" \
+run_action stuck_running 1 "an unsettled set fails even with continue-on-failure" \
   AQ_RESULTS_SETTLE_SECONDS=4 AQ_CONTINUE_ON_FAILURE=true
+assert_file_has "$WORK/summary" "Incomplete — do not read these counts" \
+  "marks a partial summary as incomplete"
+
+run_action mixed 1 "a timeout fails even with continue-on-failure" \
+  AQ_TIMEOUT_SECONDS=0 AQ_CONTINUE_ON_FAILURE=true
+assert_file_has "$WORK/log" "cover only the 3 check(s) that existed at the deadline" \
+  "says the timed-out counts are partial"
+assert_file_has "$WORK/output" "status=timed-out" "reports the timed-out status"
+assert_file_has "$WORK/summary" "Incomplete — do not read these counts" \
+  "marks a timed-out summary as incomplete"
 
 # --- proxy ---
 
