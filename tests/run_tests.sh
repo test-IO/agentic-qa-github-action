@@ -39,7 +39,7 @@ run_action() {
     AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM="" \
     AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND="" \
     AQ_APP_BINARY_ID="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
-    AQ_PROXY_CONFIG_ID="" \
+    AQ_PROXY_CONFIG_ID="" AQ_RESULTS_SETTLE_SECONDS="30" \
     "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
   # shellcheck disable=SC2319  # $? is the run above; `local rc` would reset it
   local rc=$?
@@ -93,6 +93,21 @@ run_action mixed 1 "rejects a missing url and environment-id" AQ_URL=
 run_action mixed 1 "times out instead of hanging" AQ_TIMEOUT_SECONDS=0
 run_action expired 1 "reports an expired token"
 run_action empty 1 "fails when the suite produced no checks"
+
+# --- result settling ---
+
+run_action growing 1 "waits for the whole result set before reporting"
+assert_file_has "$WORK/output" "checks-total=4"   "reports every check, not just the first read"
+assert_file_has "$WORK/output" "checks-passed=2"  "counts the passes that arrived late"
+assert_file_has "$WORK/output" "checks-blocked=2" "counts the blocks that arrived late"
+assert_file_has "$WORK/log" "results still arriving (1 -> 4)" "says the set was still growing"
+
+run_action stuck_running 1 "fails when the results never settle" AQ_RESULTS_SETTLE_SECONDS=4
+assert_file_has "$WORK/log" "never settled" "refuses to present a partial set as final"
+assert_file_has "$WORK/summary" "| Still running | 1 |" "shows unfinished checks in the summary"
+
+run_action stuck_running 0 "continue-on-failure still wins over an unsettled set" \
+  AQ_RESULTS_SETTLE_SECONDS=4 AQ_CONTINUE_ON_FAILURE=true
 
 # --- proxy ---
 

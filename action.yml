@@ -121,6 +121,10 @@ inputs:
     required: false
     default: ''
 
+  results-settle-seconds:
+    description: 'How long to keep re-reading results after the session finishes, until the set stops changing. Guards against reporting a partial run.'
+    required: false
+    default: '60'
   junit-path:
     description: 'Write a JUnit XML report to this path. Empty disables it.'
     required: false
@@ -174,6 +178,7 @@ runs:
         AQ_TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
         AQ_POLL_INTERVAL_SECONDS: ${{ inputs.poll-interval-seconds }}
         AQ_JUNIT_PATH: ${{ inputs.junit-path }}
+        AQ_RESULTS_SETTLE_SECONDS: ${{ inputs.results-settle-seconds }}
         AQ_CHANNEL: ${{ inputs.channel }}
         AQ_PRODUCT_ID: ${{ inputs.product-id }}
         AQ_DEVICE_SERIAL: ${{ inputs.device-serial }}

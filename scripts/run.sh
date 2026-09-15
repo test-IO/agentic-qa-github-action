@@ -28,6 +28,7 @@ echo "::add-mask::$AQ_TOKEN"
 : "${AQ_POLL_INTERVAL_SECONDS:=15}"
 : "${AQ_JUNIT_PATH:=}"
 : "${AQ_PROXY_CONFIG_ID:=}"
+: "${AQ_RESULTS_SETTLE_SECONDS:=60}"
 : "${AQ_CHANNEL:=web}"
 : "${AQ_PRODUCT_ID:=}"
 : "${AQ_DEVICE_SERIAL:=}"
@@ -285,16 +286,48 @@ while :; do
   sleep "$AQ_POLL_INTERVAL_SECONDS"
 done
 
-api GET "/api/v1/projects/$AQ_PROJECT_ID/test_sessions/$SESSION_ID/check_executions"
-[[ "$API_STATUS" == "200" ]] || die "could not read check executions: $(api_error)"
-RESULTS="$API_BODY"
-
+RESULTS=""
 count_state() { jq --arg s "$1" '[.check_executions[] | select(.state == $s)] | length' <<<"$RESULTS"; }
 
-total=$(jq '.check_executions | length' <<<"$RESULTS")
+read_results() {
+  api GET "/api/v1/projects/$AQ_PROJECT_ID/test_sessions/$SESSION_ID/check_executions"
+  [[ "$API_STATUS" == "200" ]] || die "could not read check executions: $(api_error)"
+  RESULTS="$API_BODY"
+}
+
+# The session status is derived from its workflow executions alone, so it can turn
+# terminal while check executions are still being written — one read then reports a
+# partial run as final (a suite of 23 was once reported as 5, with 18 blocked checks
+# missing). Re-read until the set stops growing and nothing is still running.
+settle_deadline=$(( SECONDS + AQ_RESULTS_SETTLE_SECONDS ))
+settle_interval=1
+prev_total=-1
+results_settled=false
+
+while :; do
+  read_results
+  total=$(jq '.check_executions | length' <<<"$RESULTS")
+  running=$(count_state running)
+
+  if (( total > 0 && total == prev_total && running == 0 )); then
+    results_settled=true
+    break
+  fi
+  if (( SECONDS >= settle_deadline )); then
+    break
+  fi
+  if (( prev_total >= 0 && total != prev_total )); then
+    echo "  results still arriving ($prev_total -> $total) ..."
+  fi
+  prev_total=$total
+  sleep "$settle_interval"
+done
+
 passed=$(count_state passed)
 failed=$(count_state failed)
 blocked=$(count_state blocked)
+running=$(count_state running)
+accounted=$(( passed + failed + blocked ))
 
 if $timed_out; then
   status="timed-out"
@@ -346,6 +379,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "| Passed | $passed |"
     echo "| Failed | $failed |"
     echo "| Blocked | $blocked |"
+    if (( running > 0 )); then echo "| Still running | $running |"; fi
     echo "| Total | $total |"
     if (( total > 0 )); then
       echo
@@ -363,6 +397,14 @@ echo "passed=$passed failed=$failed blocked=$blocked total=$total"
 if is_true "$AQ_CONTINUE_ON_FAILURE"; then
   echo "continue-on-failure is set — not failing the build."
   exit 0
+fi
+
+if ! $results_settled; then
+  die "the results never settled: after ${AQ_RESULTS_SETTLE_SECONDS}s the API still reported $running check(s) running or a changing total ($total so far). These counts are incomplete — do not read them as a pass. $SESSION_URL"
+fi
+
+if (( accounted != total )); then
+  die "$(( total - accounted )) of $total check(s) reported no final state, so the counts are incomplete. $SESSION_URL"
 fi
 
 if $timed_out; then

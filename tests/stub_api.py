@@ -31,7 +31,15 @@ RESULTS = {
     "empty": [],
 }
 
+GROWING = [
+    check("Login works", "passed", "ok"),
+    check("Search", "passed", "ok"),
+    check("Cart", "blocked"),
+    check("Checkout", "blocked"),
+]
+
 polls = {"n": 0}
+ce_calls = {"n": 0}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -59,6 +67,14 @@ class Handler(BaseHTTPRequestHandler):
                 proxies = []
             return self.reply(200, {"proxy_configs": proxies, "count": len(proxies)})
         if self.path.endswith("/check_executions"):
+            if MODE == "growing":
+                # first read sees one row, later reads see all four
+                ce_calls["n"] += 1
+                rows = GROWING if ce_calls["n"] >= 2 else GROWING[:1]
+                return self.reply(200, {"check_executions": rows})
+            if MODE == "stuck_running":
+                return self.reply(200, {"check_executions": [
+                    check("Login works", "passed", "ok"), check("Slow one", "running")]})
             return self.reply(200, {"check_executions": RESULTS.get(MODE, [])})
         polls["n"] += 1
         status = "running" if polls["n"] < 2 else "completed"

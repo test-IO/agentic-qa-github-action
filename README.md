@@ -117,6 +117,7 @@ Both channels take these:
 | `fail-on-blocked` | | `true` | Treat blocked checks as failures |
 | `timeout-seconds` | | `1800` | How long to wait |
 | `poll-interval-seconds` | | `15` | Seconds between status polls |
+| `results-settle-seconds` | | `60` | How long to re-read results after the session finishes, until the set stops changing |
 | `junit-path` | | | Write a JUnit XML report here |
 
 ### Web only
@@ -174,6 +175,10 @@ The action rejects zero sources and more than one. The API treats an unset sourc
 | `checks-passed` / `checks-failed` / `checks-blocked` | Per-state counts |
 
 ## Check results
+
+The action does not trust the first read of the results. A session's status is derived from its workflow executions alone, so it can report `completed` while check executions are still being written — one read then presents a partial run as final. After the session finishes the action re-reads the results until the total stops changing and no check is still running, for up to `results-settle-seconds`.
+
+If the set never settles, the action fails rather than reporting the smaller numbers, because a report that quietly loses blocked checks is worse than no report. The same applies when a check never reaches a final state. `continue-on-failure` still overrides both.
 
 Each check ends in one of three states:
 
@@ -394,6 +399,8 @@ Fire and forget, for a nightly run you inspect in the UI:
 **Tokens expire after one month.** This is fixed on the platform side, and there is no renew endpoint. When a token lapses the action stops with a clear message, but someone has to mint a new one and update the secret. Put a reminder in your calendar.
 
 **Timeouts leave the session running.** The API has no cancel endpoint, so if `timeout-seconds` is reached the action gives up but the run continues on the server. Stop it from the UI using the `session-url` output.
+
+**Under-counted results used to pass silently.** A suite of 23 checks was once reported as 5, hiding 18 blocked checks behind a green build, because the results were read once the moment the session went `completed`. Hence the settling described under [Check results](#check-results). If you see `results still arriving` in the log, that guard is doing its job.
 
 **A wrong proxy id would otherwise pass silently.** Nothing downstream rejects one: the column has no foreign key, and the runner logs `proceeding without proxy` and carries on, so the suite goes green having never used the proxy. The action checks `proxy-config-id` against the installation before creating the session and fails with the list of real ones. Sessions started from the UI or MCP still have the original behaviour.
 
