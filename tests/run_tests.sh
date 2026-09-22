@@ -39,6 +39,7 @@ run_action() {
     AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM="" \
     AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND="" \
     AQ_APP_BINARY_ID="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
+    AQ_DEVICE_LOCATION="" AQ_MAX_CONCURRENCY="" \
     AQ_PROXY_CONFIG_ID="" AQ_RESULTS_SETTLE_SECONDS="30" \
     "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
   # shellcheck disable=SC2319  # $? is the run above; `local rc` would reset it
@@ -150,6 +151,21 @@ assert_file_has "$WORK/payload.json" '"os_version": "14"'        "sends the os v
 assert_file_has "$WORK/payload.json" '"manufacturer": "Google"'  "sends the manufacturer"
 assert_file_has "$WORK/payload.json" '"mobile_browser": true'    "sends mobile_browser"
 assert_file_has "$WORK/payload.json" '"prerequisites": "log in first"' "sends prerequisites"
+
+run_action green 0 "runs a mobile session several checks at a time" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_MOBILE_BROWSER=true \
+  AQ_MAX_CONCURRENCY=5 AQ_DEVICE_LOCATION=EU
+assert_file_has "$WORK/payload.json" '"max_concurrency": 5' "sends max_concurrency as a number"
+assert_file_has "$WORK/payload.json" '"location": "EU"'     "sends the device location"
+
+run_action green 1 "rejects a non-numeric max-concurrency" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_MOBILE_BROWSER=true AQ_MAX_CONCURRENCY=lots
+run_action green 1 "rejects a zero max-concurrency" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_MOBILE_BROWSER=true AQ_MAX_CONCURRENCY=0
+
+run_action green 0 "warns that max-concurrency is ignored on a pinned device" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true AQ_MAX_CONCURRENCY=5
+assert_file_has "$WORK/log" "::warning::max-concurrency is ignored" "warns about max-concurrency on a pinned device"
 
 run_action green 0 "drops search criteria when a serial is pinned" \
   "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_DEVICE_PLATFORM=android AQ_MOBILE_BROWSER=true

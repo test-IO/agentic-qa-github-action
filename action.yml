@@ -100,6 +100,10 @@ inputs:
     description: 'Narrows auto-selection to this manufacturer.'
     required: false
     default: ''
+  device-location:
+    description: 'Narrows auto-selection to devices in this datacenter, e.g. EU or US.'
+    required: false
+    default: ''
   device-backend:
     description: 'Device provider. Defaults to the installation default (mobitru).'
     required: false
@@ -118,6 +122,10 @@ inputs:
     default: 'false'
   prerequisites:
     description: 'Free-form setup notes to run before the checks, e.g. login steps (mobile only).'
+    required: false
+    default: ''
+  max-concurrency:
+    description: 'How many checks to run at once, each on its own device (mobile only). Capped by the installation Device Quota and by the number of checks in the suite; the session refuses to start if the device farm cannot supply that many. Ignored when device-serial pins a single device. Defaults to the installation setting.'
     required: false
     default: ''
 
@@ -186,8 +194,10 @@ runs:
         AQ_DEVICE_TYPE: ${{ inputs.device-type }}
         AQ_OS_VERSION: ${{ inputs.os-version }}
         AQ_MANUFACTURER: ${{ inputs.manufacturer }}
+        AQ_DEVICE_LOCATION: ${{ inputs.device-location }}
         AQ_DEVICE_BACKEND: ${{ inputs.device-backend }}
         AQ_APP_BINARY_ID: ${{ inputs.app-binary-id }}
         AQ_APP_PACKAGE: ${{ inputs.app-package }}
         AQ_MOBILE_BROWSER: ${{ inputs.mobile-browser }}
         AQ_PREREQUISITES: ${{ inputs.prerequisites }}
+        AQ_MAX_CONCURRENCY: ${{ inputs.max-concurrency }}

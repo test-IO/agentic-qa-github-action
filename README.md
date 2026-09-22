@@ -115,7 +115,7 @@ Both channels take these:
 | `await-completion` | | `true` | Wait for results. `false` starts the run and exits |
 | `continue-on-failure` | | `false` | Report failing and blocked checks but always exit 0. Does not cover an incomplete result set |
 | `fail-on-blocked` | | `true` | Treat blocked checks as failures |
-| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole suite — a 23-check web suite takes about an hour |
+| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole suite — a 23-check web suite takes about an hour, and a mobile suite scales down with `max-concurrency` |
 | `poll-interval-seconds` | | `15` | Seconds between status polls |
 | `results-settle-seconds` | | `60` | How long to re-read results after the session finishes, until the set stops changing |
 | `junit-path` | | | Write a JUnit XML report here |
@@ -142,11 +142,13 @@ Both channels take these:
 | `device-type` | | | Narrows auto-selection, e.g. `phone` or `tablet` |
 | `os-version` | | | Narrows auto-selection to this OS version |
 | `manufacturer` | | | Narrows auto-selection to this manufacturer |
+| `device-location` | | | Narrows auto-selection to this datacenter, e.g. `EU` or `US` |
 | `device-backend` | | `mobitru` | Device provider |
 | `app-binary-id` | | | UUID of an uploaded binary to install before the run |
 | `app-package` | | | Package name (Android) or Bundle ID (iOS) of an app already on the device |
 | `mobile-browser` | | `false` | Test the device browser instead of an app |
 | `prerequisites` | | | Free-form setup notes to run before the checks, e.g. login steps |
+| `max-concurrency` | | installation default | How many checks to run at once, each on its own device |
 
 Setting a web input on a mobile run logs a warning and changes nothing — the mobile API takes no URL, browser, viewport, workflow type or replay flag.
 
@@ -163,6 +165,25 @@ A mobile run needs `channel: mobile`, a `product-id` for a mobile product, and t
 - `mobile-browser: true` — the device's own browser. Nothing is installed.
 
 The action rejects zero sources and more than one. The API treats an unset source as "install a binary" and only notices the missing upload at start time, which would leave you a session that cannot run, so it is settled before anything is created.
+
+**How many at a time.** `max-concurrency` runs that many checks in parallel, each on its own device. The installation books a pool of devices when the session starts, runs one check per device, and hands each device to the next waiting check as it frees up, so a 23-check suite does not book 23 devices.
+
+Three things cap it, and the lowest wins:
+
+- the **Device Quota** an admin sets per installation, under System Configuration -> Mobitru
+- the number of checks in the suite
+- how many matching devices the farm actually has free
+
+Because the quota is a ceiling rather than an override, asking for more than it allows books the quota's worth instead of failing. Asking for more devices than the farm can supply *does* fail, before anything is booked, so a short pool never leaves half a session holding devices.
+
+Leave it unset to use the installation default, which is normally one check at a time.
+
+Two things worth knowing:
+
+- It is ignored with a pinned `device-serial`, which is a pool of exactly one device. The action warns rather than failing.
+- The number you ask for is remembered even if the run ends up narrower — a device the app will not install on is swapped out, and if no replacement is free the session simply runs on fewer. A later re-run still asks for the original number.
+
+Concurrency also costs worker capacity on the installation, not just devices: each running check occupies one agent slot for its whole duration. Setting `max-concurrency` above the number of slots books devices that then sit idle waiting their turn, so it is worth checking with whoever runs the installation before going wide.
 
 ## Outputs
 
@@ -302,6 +323,24 @@ Run a mobile suite on an auto-selected Android phone, installing a binary:
     app-binary-id: ${{ vars.AGENTIC_QA_APP_BINARY }}
 ```
 
+Five checks at a time on EU phones, for a suite that would otherwise take hours:
+
+```yaml
+- uses: test-IO/agentic-qa-github-action@v1
+  with:
+    host: ${{ vars.AGENTIC_QA_HOST }}
+    token: ${{ secrets.AGENTIC_QA_TOKEN }}
+    project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+    check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+    channel: mobile
+    product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+    device-platform: android
+    device-type: phone
+    device-location: EU
+    max-concurrency: 5
+    app-binary-id: ${{ vars.AGENTIC_QA_APP_BINARY }}
+```
+
 Or on one pinned device, against an app that is already installed:
 
 ```yaml
@@ -410,7 +449,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 **Listing app binaries needs an owner token.** `GET /products/:id/mobile_binary_files` is owner-only, though `app-binary-id` works with any token that can reach the product. Look the ID up once and store it as a repository variable.
 
-**There is no device-location filter.** The API documents `search_criteria[location]` for picking a datacenter, but does not accept it, so the action does not offer it. Pin a `device-serial` if you need a specific device.
+**`device-location` only narrows auto-selection.** It is dropped with a warning alongside a pinned `device-serial`, which already names one device. Older installations may not accept it — the filter was added to the mobile API after the datacenter values themselves were exposed.
 
 **Private installations need a reachable host.** GitHub-hosted runners must be able to open an HTTPS connection to `host`. If your installation sits behind a firewall or VPN, use a self-hosted runner.
 
