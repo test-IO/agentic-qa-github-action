@@ -109,7 +109,11 @@ inputs:
     required: false
     default: ''
   app-binary-id:
-    description: 'UUID of an uploaded app binary to install before the run. One app source is required for mobile.'
+    description: 'UUID of an already uploaded app binary to install before the run. One app source is required for mobile.'
+    required: false
+    default: ''
+  app-binary-path:
+    description: 'Path to an .apk, .aab or .ipa in the workspace. Uploaded to the product before the run, so a CI build is tested as built.'
     required: false
     default: ''
   app-package:
@@ -197,6 +201,7 @@ runs:
         AQ_DEVICE_LOCATION: ${{ inputs.device-location }}
         AQ_DEVICE_BACKEND: ${{ inputs.device-backend }}
         AQ_APP_BINARY_ID: ${{ inputs.app-binary-id }}
+        AQ_APP_BINARY_PATH: ${{ inputs.app-binary-path }}
         AQ_APP_PACKAGE: ${{ inputs.app-package }}
         AQ_MOBILE_BROWSER: ${{ inputs.mobile-browser }}
         AQ_PREREQUISITES: ${{ inputs.prerequisites }}

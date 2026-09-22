@@ -40,7 +40,7 @@ curl -s "$HOST/api/v1/products/$PRODUCT_ID/mobile_binary_files" -H "Authorizatio
   | jq '.mobile_binary_files[] | {id, filename, platform}'
 ```
 
-Listing binaries needs an owner token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them.
+Listing binaries needs an owner token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them. You need no ID at all if CI uploads the build it just made; see [Fresh builds](#fresh-builds).
 
 To send browser traffic through a corporate proxy, list the configured ones and take the ID:
 
@@ -144,7 +144,8 @@ Both channels take these:
 | `manufacturer` | | | Narrows auto-selection to this manufacturer |
 | `device-location` | | | Narrows auto-selection to this datacenter, e.g. `EU` or `US` |
 | `device-backend` | | `mobitru` | Device provider |
-| `app-binary-id` | | | UUID of an uploaded binary to install before the run |
+| `app-binary-path` | | | Path to an `.apk`, `.aab` or `.ipa` in the workspace. Uploaded before the run, so the session tests the build this workflow made |
+| `app-binary-id` | | | UUID of an already uploaded binary to install before the run |
 | `app-package` | | | Package name (Android) or Bundle ID (iOS) of an app already on the device |
 | `mobile-browser` | | `false` | Test the device browser instead of an app |
 | `prerequisites` | | | Free-form setup notes to run before the checks, e.g. login steps |
@@ -160,7 +161,8 @@ A mobile run needs `channel: mobile`, a `product-id` for a mobile product, and t
 
 **What runs on it.** Exactly one of:
 
-- `app-binary-id` — install an uploaded APK or IPA first.
+- `app-binary-path` — upload a build from the workspace and install that. See [Fresh builds](#fresh-builds).
+- `app-binary-id` — install a binary that was uploaded earlier.
 - `app-package` — an app already installed on the device. Needs `device-serial`, since it has to be a device you picked.
 - `mobile-browser: true` — the device's own browser. Nothing is installed.
 
@@ -184,6 +186,18 @@ Two things worth knowing:
 - The number you ask for is remembered even if the run ends up narrower — a device the app will not install on is swapped out, and if no replacement is free the session simply runs on fewer. A later re-run still asks for the original number.
 
 Concurrency also costs worker capacity on the installation, not just devices: each running check occupies one agent slot for its whole duration. Setting `max-concurrency` above the number of slots books devices that then sit idle waiting their turn, so it is worth checking with whoever runs the installation before going wide.
+
+### Fresh builds
+
+`app-binary-id` installs a binary someone uploaded at some earlier point, which is rarely the code you just pushed. `app-binary-path` takes a file out of the runner's workspace instead: the action uploads it to the product and starts the session on it, so the run tests this commit's build.
+
+The action builds nothing. The file comes from the run itself:
+
+- **A build job in the same workflow.** Gradle leaves the APK under `app/build/outputs/apk/`, `xcodebuild -exportArchive` leaves the IPA in the export directory. Jobs get separate runners, so hand the file over with `actions/upload-artifact` and `actions/download-artifact`.
+- **The same job.** Build and check in one job and the path is just the build output, with no artifact hop.
+- **Somewhere else.** A release asset, a nightly build, an internal build service — download it into the workspace first with `gh release download` or `curl`, then point at the file.
+
+Uploading needs an owner or engineer token, the same level that lists binaries; a plain CI token can still run on an `app-binary-id`. The file must be an `.apk`, `.aab` or `.ipa` within the installation's size limit, 2 GB unless it was changed. Every run adds a binary to the product and nothing is replaced, so uploading on every commit grows that list.
 
 ## Outputs
 
@@ -323,6 +337,42 @@ Run a mobile suite on an auto-selected Android phone, installing a binary:
     app-binary-id: ${{ vars.AGENTIC_QA_APP_BINARY }}
 ```
 
+Check the build this run produced, instead of whatever was uploaded last:
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: app/build/outputs/apk/release/app-release.apk
+
+  mobile-checks:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: build
+      - uses: test-IO/agentic-qa-github-action@v1
+        with:
+          host: ${{ vars.AGENTIC_QA_HOST }}
+          token: ${{ secrets.AGENTIC_QA_TOKEN }}
+          project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          channel: mobile
+          product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+          device-platform: android
+          app-binary-path: build/app-release.apk
+```
+
+An artifact keeps the file, not the directory it was built in, so the download lands it at `build/app-release.apk`.
+
 Five checks at a time on EU phones, for a suite that would otherwise take hours:
 
 ```yaml
@@ -447,13 +497,13 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 **Proxies are web only.** The mobile API takes no proxy field, so `proxy-config-id` on a mobile run warns and is dropped.
 
-**Listing app binaries needs an owner token.** `GET /products/:id/mobile_binary_files` is owner-only, though `app-binary-id` works with any token that can reach the product. Look the ID up once and store it as a repository variable.
+**Listing and uploading app binaries need an owner token.** `GET /products/:id/mobile_binary_files` and both halves of the upload are owner-only, though `app-binary-id` works with any token that can reach the product. Either give CI an owner token so `app-binary-path` can upload, or look the ID up once yourself and store it as a repository variable.
 
 **`device-location` only narrows auto-selection.** It is dropped with a warning alongside a pinned `device-serial`, which already names one device. Older installations may not accept it — the filter was added to the mobile API after the datacenter values themselves were exposed.
 
 **Private installations need a reachable host.** GitHub-hosted runners must be able to open an HTTPS connection to `host`. If your installation sits behind a firewall or VPN, use a self-hosted runner.
 
-**Requirements.** `bash`, `curl` and `jq`. All are present on GitHub-hosted runners.
+**Requirements.** `bash`, `curl` and `jq`, plus `openssl` for `app-binary-path`. All are present on GitHub-hosted runners.
 
 ## Development
 
@@ -461,7 +511,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 tests/run_tests.sh
 ```
 
-The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, expired tokens, JUnit output and escaping, both channels' request bodies, and the mobile input validation.
+The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, expired tokens, JUnit output and escaping, both channels' request bodies, the binary upload, and the mobile input validation.
 
 `scripts/run.sh` uses bash 4 parameter expansion, so run the tests with bash 4 or newer. That is what GitHub-hosted runners have; macOS ships bash 3.2, where you need `brew install bash` and `/opt/homebrew/bin/bash tests/run_tests.sh`.
 
