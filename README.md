@@ -40,7 +40,7 @@ curl -s "$HOST/api/v1/products/$PRODUCT_ID/mobile_binary_files" -H "Authorizatio
   | jq '.mobile_binary_files[] | {id, filename, platform}'
 ```
 
-Listing binaries needs an owner or engineer token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them. You need no ID at all if CI uploads the build it just made; see [Fresh builds](#fresh-builds).
+Listing binaries needs an owner or engineer token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them. You need no ID at all if CI uploads the build itself; see [Uploading a build](#uploading-a-build).
 
 To send browser traffic through a corporate proxy, list the configured ones and take the ID:
 
@@ -82,7 +82,7 @@ For the **secret**:
 3. Fill in **Name** and **Secret**.
 4. Click **Add secret**.
 
-Store the optional IDs the same way when you use them — `AGENTIC_QA_PROXY` for a proxy config, `AGENTIC_QA_MOBILE_PRODUCT` and `AGENTIC_QA_APP_BINARY` for a mobile run. They are ordinary variables; only the token needs to be a secret.
+Store the optional IDs the same way when you use them — `AGENTIC_QA_PROXY` for a proxy config, `AGENTIC_QA_MOBILE_PRODUCT`, `AGENTIC_QA_MOBILE_SUITE` and `AGENTIC_QA_APP_BINARY` for a mobile run. They are ordinary variables; only the token needs to be a secret.
 
 A secret cannot be read back afterwards — you can only overwrite it. Variable names accept letters, digits and underscores, must not start with a digit or with `GITHUB_`, and are matched case-insensitively.
 
@@ -144,7 +144,7 @@ Both channels take these:
 | `manufacturer` | | | Narrows auto-selection to this manufacturer |
 | `device-location` | | | Narrows auto-selection to this datacenter, e.g. `EU` or `US` |
 | `device-backend` | | `mobitru` | Device provider |
-| `app-binary-path` | | | Path to an `.apk`, `.aab` or `.ipa` in the workspace. Uploaded before the run, so the session tests the build this workflow made |
+| `app-binary-path` | | | Path to an `.apk`, `.aab` or `.ipa` on the runner. The action uploads it to Agentic QA and runs the session on it |
 | `app-binary-id` | | | UUID of an already uploaded binary to install before the run |
 | `app-package` | | | Package name (Android) or Bundle ID (iOS) of an app already on the device |
 | `mobile-browser` | | `false` | Test the device browser instead of an app |
@@ -157,11 +157,11 @@ Setting a web input on a mobile run logs a warning and changes nothing — the m
 
 A mobile run needs `channel: mobile`, a `product-id` for a mobile product, and two independent choices.
 
-**Which device.** Either `device-serial` for one exact device, or `device-platform` to let the installation pick one — narrow that with `device-type`, `os-version` and `manufacturer`. If you set both, the serial wins and the criteria are dropped.
+**Which device.** Either `device-serial` for one exact device, or `device-platform` to let the installation pick one — narrow that with `device-type`, `os-version`, `manufacturer` and `device-location`. If you set both, the serial wins and the criteria are dropped.
 
 **What runs on it.** Exactly one of:
 
-- `app-binary-path` — upload a build from the workspace and install that. See [Fresh builds](#fresh-builds).
+- `app-binary-path` — upload a build file to Agentic QA and install that. See [Uploading a build](#uploading-a-build).
 - `app-binary-id` — install a binary that was uploaded earlier.
 - `app-package` — an app already installed on the device. Needs `device-serial`, since it has to be a device you picked.
 - `mobile-browser: true` — the device's own browser. Nothing is installed.
@@ -187,17 +187,134 @@ Two things worth knowing:
 
 Concurrency also costs worker capacity on the installation, not just devices: each running check occupies one agent slot for its whole duration. Setting `max-concurrency` above the number of slots books devices that then sit idle waiting their turn, so it is worth checking with whoever runs the installation before going wide.
 
-### Fresh builds
+### Uploading a build
 
-`app-binary-id` installs a binary someone uploaded at some earlier point, which is rarely the code you just pushed. `app-binary-path` takes a file out of the runner's workspace instead: the action uploads it to the product and starts the session on it, so the run tests this commit's build.
+`app-binary-id` runs a build that is already in Agentic QA. To test a new build, set `app-binary-path` to the build file on the runner instead. That one action step then:
 
-The action builds nothing. The file comes from the run itself:
+1. uploads the file to the mobile product in Agentic QA and gets back the new build's ID,
+2. creates a mobile session that installs that build,
+3. starts the session and waits for it to finish,
+4. passes or fails the job from the check results.
 
-- **A build job in the same workflow.** Gradle leaves the APK under `app/build/outputs/apk/`, `xcodebuild -exportArchive` leaves the IPA in the export directory. Jobs get separate runners, so hand the file over with `actions/upload-artifact` and `actions/download-artifact`.
-- **The same job.** Build and check in one job and the path is just the build output, with no artifact hop.
-- **Somewhere else.** A release asset, a nightly build, an internal build service — download it into the workspace first with `gh release download` or `curl`, then point at the file.
+No other step is needed to upload the build or to start the session. The job log shows each stage: `Uploaded app.apk (… bytes) as <id>`, `Created session <id>`, the session link, then `Started.`
+
+The action does not fetch or build the file. Get it onto the runner first, from wherever it lives:
+
+- **An external build service.** Download it with `curl`, or with `gh release download` for a GitHub release.
+- **An artifact from an earlier job in the same workflow.** `actions/download-artifact` with the artifact name.
+- **An artifact from another workflow**, such as a separate build workflow. `actions/download-artifact` with that run's `run-id` and a `github-token`.
+- **The same job.** Build and check in one job, and the path is just the build output.
 
 Uploading needs an owner or engineer token, the same level that lists binaries; a plain CI token can still run on an `app-binary-id`. The file must be an `.apk`, `.aab` or `.ipa` within the installation's size limit, 2 GB unless it was changed. Every run adds a binary to the product and nothing is replaced, so uploading on every commit grows that list.
+
+**From an external build service:**
+
+```yaml
+jobs:
+  mobile-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the build from your build service
+        env:
+          BUILDS_TOKEN: ${{ secrets.BUILDS_TOKEN }}
+        run: |
+          curl -fsSL -H "Authorization: Bearer $BUILDS_TOKEN" \
+            -o app.apk https://builds.example.com/android/latest.apk
+
+      - name: Upload it to Agentic QA and run the suite
+        uses: test-IO/agentic-qa-github-action@v1
+        with:
+          host: ${{ vars.AGENTIC_QA_HOST }}
+          token: ${{ secrets.AGENTIC_QA_TOKEN }}
+          project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          channel: mobile
+          product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+          device-platform: android
+          app-binary-path: app.apk
+```
+
+`-f` makes `curl` fail on an HTTP error instead of saving the error page as `app.apk`. For iOS, download the `.ipa` and set `device-platform: ios`.
+
+**From an earlier job in the same workflow:**
+
+```yaml
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: ./gradlew assembleDebug
+      - name: Save the build as a GitHub artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+  mobile-checks:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the build from GitHub
+        uses: actions/download-artifact@v8
+        with:
+          name: apk
+          path: build
+
+      - name: Upload it to Agentic QA and run the suite
+        uses: test-IO/agentic-qa-github-action@v1
+        with:
+          host: ${{ vars.AGENTIC_QA_HOST }}
+          token: ${{ secrets.AGENTIC_QA_TOKEN }}
+          project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          channel: mobile
+          product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+          device-platform: android
+          app-binary-path: build/app-debug.apk
+```
+
+An artifact keeps the file, not the directory it was built in, so the download lands it at `build/app-debug.apk`.
+
+For a release build, `assembleRelease` writes `app-release.apk` only when the release build type has a signing config. Without one you get `app-release-unsigned.apk`, which Android will not install.
+
+**From another workflow**, when a separate workflow builds the app. This one starts when that workflow finishes and takes the build from its run:
+
+```yaml
+on:
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+
+jobs:
+  mobile-checks:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Download the build from the Build run
+        uses: actions/download-artifact@v8
+        with:
+          name: apk
+          path: build
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Upload it to Agentic QA and run the suite
+        uses: test-IO/agentic-qa-github-action@v1
+        with:
+          host: ${{ vars.AGENTIC_QA_HOST }}
+          token: ${{ secrets.AGENTIC_QA_TOKEN }}
+          project-id: ${{ vars.AGENTIC_QA_PROJECT }}
+          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          channel: mobile
+          product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
+          device-platform: android
+          app-binary-path: build/app-debug.apk
+```
+
+`Build` is the `name:` of the workflow that saves the `apk` artifact. Reading another run's artifacts needs `github-token` and `actions: read`; for a run in another repository, set `repository` and use a personal access token instead. GitHub only fires `workflow_run` for a workflow file on the default branch, so merge this file before expecting it to run.
 
 ## Outputs
 
@@ -337,43 +454,7 @@ Run a mobile suite on an auto-selected Android phone, installing a binary:
     app-binary-id: ${{ vars.AGENTIC_QA_APP_BINARY }}
 ```
 
-Check the build this run produced, instead of whatever was uploaded last:
-
-```yaml
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - run: ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v7
-        with:
-          name: apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-
-  mobile-checks:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: apk
-          path: build
-      - uses: test-IO/agentic-qa-github-action@v1
-        with:
-          host: ${{ vars.AGENTIC_QA_HOST }}
-          token: ${{ secrets.AGENTIC_QA_TOKEN }}
-          project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
-          channel: mobile
-          product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
-          device-platform: android
-          app-binary-path: build/app-debug.apk
-```
-
-An artifact keeps the file, not the directory it was built in, so the download lands it at `build/app-debug.apk`.
-
-For a release build, `assembleRelease` writes `app-release.apk` only when the release build type has a signing config. Without one you get `app-release-unsigned.apk`, which Android will not install.
+To upload a new build to Agentic QA and run on it, see [Uploading a build](#uploading-a-build), which has examples for a build from an external service, from an earlier job, and from another workflow.
 
 Five checks at a time on EU phones, for a suite that would otherwise take hours:
 
@@ -467,7 +548,7 @@ Parallel mobile runs compete for devices, so a few rules apply that web does not
 
 **Use `device-platform`, not `device-serial`.** Auto-selection lists the available devices and picks one at random precisely to spread concurrent sessions across the pool. A pinned serial skips that: two sessions pinning the same device both proceed to reservation, and the one that loses fails outright, because a device is held for three hours and reservation does not queue or retry.
 
-**Keep the leg count below the pool.** Selection and reservation are separate steps, so two legs can still pick the same device and one loses the race — the wider the pool, the rarer that is. Every extra `device-type`, `os-version` or `manufacturer` filter narrows the pool and makes it more likely. When nothing matches at all the step fails with `No devices available matching criteria`.
+**Keep the leg count below the pool.** Selection and reservation are separate steps, so two legs can still pick the same device and one loses the race — the wider the pool, the rarer that is. Every extra `device-type`, `os-version`, `manufacturer` or `device-location` filter narrows the pool and makes it more likely. When nothing matches at all the step fails with `No devices available matching criteria`.
 
 Report without blocking the merge:
 
