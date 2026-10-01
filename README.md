@@ -40,7 +40,7 @@ curl -s "$HOST/api/v1/products/$PRODUCT_ID/mobile_binary_files" -H "Authorizatio
   | jq '.mobile_binary_files[] | {id, filename, platform}'
 ```
 
-Listing binaries needs an owner token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them. You need no ID at all if CI uploads the build it just made; see [Fresh builds](#fresh-builds).
+Listing binaries needs an owner or engineer token, so do it once yourself and store the ID — the CI token can use a binary ID without being able to list them. You need no ID at all if CI uploads the build it just made; see [Fresh builds](#fresh-builds).
 
 To send browser traffic through a corporate proxy, list the configured ones and take the ID:
 
@@ -345,11 +345,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./gradlew assembleRelease
+      - run: ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
 
   mobile-checks:
     needs: build
@@ -368,10 +368,12 @@ jobs:
           channel: mobile
           product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
           device-platform: android
-          app-binary-path: build/app-release.apk
+          app-binary-path: build/app-debug.apk
 ```
 
-An artifact keeps the file, not the directory it was built in, so the download lands it at `build/app-release.apk`.
+An artifact keeps the file, not the directory it was built in, so the download lands it at `build/app-debug.apk`.
+
+For a release build, `assembleRelease` writes `app-release.apk` only when the release build type has a signing config. Without one you get `app-release-unsigned.apk`, which Android will not install.
 
 Five checks at a time on EU phones, for a suite that would otherwise take hours:
 
@@ -497,7 +499,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 **Proxies are web only.** The mobile API takes no proxy field, so `proxy-config-id` on a mobile run warns and is dropped.
 
-**Listing and uploading app binaries need an owner token.** `GET /products/:id/mobile_binary_files` and both halves of the upload are owner-only, though `app-binary-id` works with any token that can reach the product. Either give CI an owner token so `app-binary-path` can upload, or look the ID up once yourself and store it as a repository variable.
+**Listing and uploading app binaries need an owner or engineer token.** `GET /products/:id/mobile_binary_files` and both halves of the upload refuse every other role, though `app-binary-id` works with any token that can reach the product. Either give CI an owner or engineer token so `app-binary-path` can upload, or look the ID up once yourself and store it as a repository variable.
 
 **`device-location` only narrows auto-selection.** It is dropped with a warning alongside a pinned `device-serial`, which already names one device. Older installations may not accept it — the filter was added to the mobile API after the datacenter values themselves were exposed.
 
