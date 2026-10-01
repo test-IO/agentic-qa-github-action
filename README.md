@@ -246,7 +246,7 @@ jobs:
           junit-path: reports/agentic-qa.xml
 
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agentic-qa
           path: reports/agentic-qa.xml
@@ -289,13 +289,13 @@ steps:
       junit-path: reports/${{ matrix.name }}.xml
 
   - if: always()
-    uses: actions/upload-artifact@v4
+    uses: actions/upload-artifact@v7
     with:
       name: agentic-qa-${{ matrix.name }}
       path: reports/${{ matrix.name }}.xml
 ```
 
-Name the sessions yourself. The default name is the workflow, the short SHA and the run number, which is the same string for every session in one run, so without `session-name` they are indistinguishable in the UI. The artifact name has to differ per leg too — `upload-artifact@v4` rejects duplicates. Job outputs do not survive a matrix, since GitHub overwrites them leg by leg, so collect the JUnit files as artifacts instead of reading `steps.*.outputs` from a later job.
+Name the sessions yourself. The default name is the workflow, the short SHA and the run number, which is the same string for every session in one run, so without `session-name` they are indistinguishable in the UI. The artifact name has to differ per leg too — `upload-artifact@v7` rejects duplicates. Job outputs do not survive a matrix, since GitHub overwrites them leg by leg, so collect the JUnit files as artifacts instead of reading `steps.*.outputs` from a later job.
 
 To run the suites one after another in a single job, give every step its own `id`, `session-name` and `junit-path`:
 
@@ -344,9 +344,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: apk
           path: app/build/outputs/apk/debug/app-debug.apk
@@ -355,7 +355,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: apk
           path: build
