@@ -38,6 +38,7 @@ echo "::add-mask::$AQ_TOKEN"
 : "${AQ_MANUFACTURER:=}"
 : "${AQ_DEVICE_BACKEND:=}"
 : "${AQ_APP_BINARY_ID:=}"
+: "${AQ_APP_BINARY_PATH:=}"
 : "${AQ_APP_PACKAGE:=}"
 : "${AQ_MOBILE_BROWSER:=false}"
 : "${AQ_PREREQUISITES:=}"
@@ -133,14 +134,22 @@ else
   # notices the missing upload when the session starts, which would leave an
   # unstartable session behind, so settle it before anything is created.
   sources=0
-  if is_true "$AQ_MOBILE_BROWSER";   then sources=$((sources + 1)); fi
-  if [[ -n "$AQ_APP_PACKAGE"   ]];   then sources=$((sources + 1)); fi
-  if [[ -n "$AQ_APP_BINARY_ID" ]];   then sources=$((sources + 1)); fi
+  if is_true "$AQ_MOBILE_BROWSER";     then sources=$((sources + 1)); fi
+  if [[ -n "$AQ_APP_PACKAGE"     ]];   then sources=$((sources + 1)); fi
+  if [[ -n "$AQ_APP_BINARY_ID"   ]];   then sources=$((sources + 1)); fi
+  if [[ -n "$AQ_APP_BINARY_PATH" ]];   then sources=$((sources + 1)); fi
   if (( sources == 0 )); then
-    die "mobile needs an app source: set one of app-binary-id, app-package or mobile-browser."
+    die "mobile needs an app source: set one of app-binary-path, app-binary-id, app-package or mobile-browser."
   fi
   if (( sources > 1 )); then
-    die "set only one app source out of app-binary-id, app-package and mobile-browser."
+    die "set only one app source out of app-binary-path, app-binary-id, app-package and mobile-browser."
+  fi
+  if [[ -n "$AQ_APP_BINARY_PATH" ]]; then
+    [[ -f "$AQ_APP_BINARY_PATH" ]] || die "app-binary-path '$AQ_APP_BINARY_PATH' is not a file. It is read from the workspace, so check out or download the build first."
+    case "${AQ_APP_BINARY_PATH,,}" in
+      *.apk|*.aab|*.ipa) ;;
+      *) die "app-binary-path must be an .apk, .aab or .ipa, got '$AQ_APP_BINARY_PATH'." ;;
+    esac
   fi
   if [[ -n "$AQ_APP_PACKAGE" && -z "$AQ_DEVICE_SERIAL" ]]; then
     die "app-package runs an app already installed on one device, so it needs device-serial."
@@ -186,8 +195,47 @@ if [[ -z "$session_name" ]]; then
   fi
 fi
 
+# Two-phase direct upload: reserve a blob, stream the bytes to wherever the API
+# points (local disk, GCS), then turn it into a binary record. The PUT carries
+# only the headers the API handed back — never the API key, which would leak it
+# to the storage host.
+upload_app_binary() {
+  local path="$1" name size checksum init url signed
+  command -v openssl >/dev/null 2>&1 || die "openssl is required to upload app-binary-path."
+  name=$(basename "$path")
+  size=$(wc -c < "$path" | tr -d '[:space:]')
+  checksum=$(openssl dgst -md5 -binary "$path" | base64 | tr -d '\n')
+
+  api POST "/api/v1/products/$AQ_PRODUCT_ID/mobile_binary_files/initiate_upload" \
+    "$(jq -n --arg f "$name" --argjson s "$size" --arg c "$checksum" \
+        '{filename: $f, byte_size: $s, checksum: $c}')"
+  [[ "$API_STATUS" == "200" ]] || die "could not start the binary upload: $(api_error)"
+  init="$API_BODY"
+  url=$(jq -r '.direct_upload_url' <<<"$init")
+  signed=$(jq -r '.blob_signed_id' <<<"$init")
+  [[ -n "$url" && "$url" != "null" ]] || die "upload did not return a direct_upload_url: $init"
+
+  local -a put=(-sS -o /dev/null -w '%{http_code}' -X PUT --upload-file "$path" --max-time 600)
+  while IFS= read -r header; do
+    [[ -n "$header" ]] && put+=(-H "$header")
+  done < <(jq -r '(.direct_upload_headers // {}) | to_entries[] | "\(.key): \(.value)"' <<<"$init")
+  local code
+  if ! code=$(curl "${put[@]}" "$url" 2>&1); then
+    die "could not upload $name to the storage host."
+  fi
+  [[ "$code" =~ ^2[0-9][0-9]$ ]] || die "uploading $name failed with HTTP $code."
+
+  api POST "/api/v1/products/$AQ_PRODUCT_ID/mobile_binary_files/commit_upload" \
+    "$(jq -n --arg b "$signed" '{blob_signed_id: $b}')"
+  [[ "$API_STATUS" == "201" ]] || die "could not finish the binary upload: $(api_error)"
+  AQ_APP_BINARY_ID=$(jq -r '.id' <<<"$API_BODY")
+  [[ -n "$AQ_APP_BINARY_ID" && "$AQ_APP_BINARY_ID" != "null" ]] || die "upload did not return a binary id: $API_BODY"
+  echo "Uploaded $name ($size bytes) as $AQ_APP_BINARY_ID"
+}
+
 if [[ "$AQ_CHANNEL" == "mobile" ]]; then
   if is_true "$AQ_MOBILE_BROWSER"; then browser_json=true; else browser_json=false; fi
+  if [[ -n "$AQ_APP_BINARY_PATH" ]]; then upload_app_binary "$AQ_APP_BINARY_PATH"; fi
   create_path="/api/v1/projects/$AQ_PROJECT_ID/mobile/test_sessions"
   payload=$(jq -n \
     --arg name "$session_name" \

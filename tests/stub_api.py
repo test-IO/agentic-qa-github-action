@@ -85,6 +85,29 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or "{}")
         if self.path.endswith("/run"):
             return self.reply(200, {"test_session": {"id": "sess-1", "status": "started"}})
+        if self.path.endswith("/mobile_binary_files/initiate_upload"):
+            with open(os.path.join(WORK, "initiate.json"), "w") as handle:
+                json.dump(body, handle, indent=2)
+            if MODE == "upload_rejected":
+                return self.reply(422, {"error": "byte_size exceeds maximum of 10 bytes"})
+            return self.reply(200, {
+                "direct_upload_url": f"http://127.0.0.1:{PORT}/blob/put",
+                "direct_upload_headers": {"Content-Type": "application/octet-stream"},
+                "blob_signed_id": "signed-blob-1",
+                "max_bytes": 2147483648,
+                "platform": "android",
+            })
+        if self.path.endswith("/mobile_binary_files/commit_upload"):
+            with open(os.path.join(WORK, "commit.json"), "w") as handle:
+                json.dump(body, handle, indent=2)
+            if MODE == "commit_rejected":
+                return self.reply(422, {"error": "Upload not completed"})
+            return self.reply(201, {
+                "id": "binary-99",
+                "filename": "app-release.apk",
+                "platform": "android",
+                "content_length": 4,
+            })
         with open(os.path.join(WORK, "payload.json"), "w") as handle:
             json.dump(body, handle, indent=2)
         with open(os.path.join(WORK, "create_path"), "w") as handle:
@@ -92,6 +115,19 @@ class Handler(BaseHTTPRequestHandler):
         if MODE == "validation":
             return self.reply(422, {"error": {"device_serial": ["is not a known device"]}})
         return self.reply(201, {"test_session": {"id": "sess-1", "status": "created"}})
+
+
+    def do_PUT(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        payload = self.rfile.read(length)
+        with open(os.path.join(WORK, "uploaded.bin"), "wb") as handle:
+            handle.write(payload)
+        with open(os.path.join(WORK, "upload_headers.json"), "w") as handle:
+            json.dump(dict(self.headers), handle, indent=2)
+        if MODE == "storage_down":
+            return self.reply(500, {"error": "storage unavailable"})
+        self.send_response(204)
+        self.end_headers()
 
 
 HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

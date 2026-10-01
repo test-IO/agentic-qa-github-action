@@ -38,7 +38,7 @@ run_action() {
     AQ_JUNIT_PATH="$WORK/report.xml" \
     AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM="" \
     AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND="" \
-    AQ_APP_BINARY_ID="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
+    AQ_APP_BINARY_ID="" AQ_APP_BINARY_PATH="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
     AQ_DEVICE_LOCATION="" AQ_MAX_CONCURRENCY="" \
     AQ_PROXY_CONFIG_ID="" AQ_RESULTS_SETTLE_SECONDS="30" \
     "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
@@ -151,6 +151,60 @@ assert_file_has "$WORK/payload.json" '"os_version": "14"'        "sends the os v
 assert_file_has "$WORK/payload.json" '"manufacturer": "Google"'  "sends the manufacturer"
 assert_file_has "$WORK/payload.json" '"mobile_browser": true'    "sends mobile_browser"
 assert_file_has "$WORK/payload.json" '"prerequisites": "log in first"' "sends prerequisites"
+
+# --- uploading a fresh build ---
+
+BUILD="$WORK/app-release.apk"
+printf 'apk!' > "$BUILD"
+
+run_action green 0 "uploads a fresh build and runs the session on it" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$BUILD"
+assert_file_has "$WORK/initiate.json" '"filename": "app-release.apk"' "sends the filename"
+assert_file_has "$WORK/initiate.json" '"byte_size": 4'                "sends the byte size"
+assert_file_has "$WORK/initiate.json" '"checksum"'                    "sends a checksum"
+assert_file_has "$WORK/commit.json"   '"blob_signed_id": "signed-blob-1"' "commits the blob it was given"
+assert_file_has "$WORK/payload.json"  '"selected_artifact_id": "binary-99"' "runs on the uploaded binary"
+assert_file_has "$WORK/log"           "Uploaded app-release.apk"      "reports the upload"
+
+if [[ "$(cat "$WORK/uploaded.bin" 2>/dev/null)" == "apk!" ]]; then
+  echo "ok   streams the file bytes to the storage host"
+  pass=$((pass + 1))
+else
+  echo "FAIL streams the file bytes to the storage host"
+  fail=$((fail + 1))
+fi
+
+# The storage host is not ours; the API key must not travel to it.
+if grep -qi "ApiKey" "$WORK/upload_headers.json"; then
+  echo "FAIL keeps the API key out of the storage upload"
+  fail=$((fail + 1))
+else
+  echo "ok   keeps the API key out of the storage upload"
+  pass=$((pass + 1))
+fi
+
+run_action green 1 "fails when the build file is missing" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$WORK/not-here.apk"
+assert_file_has "$WORK/log" "is not a file" "explains a missing build file"
+
+printf 'x' > "$WORK/build.txt"
+run_action green 1 "rejects a build that is not an apk, aab or ipa" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$WORK/build.txt"
+
+run_action green 1 "rejects both a build path and a binary id" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$BUILD" AQ_APP_BINARY_ID=bin-1
+
+run_action upload_rejected 1 "fails when the upload is refused" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$BUILD"
+assert_file_has "$WORK/log" "could not start the binary upload" "explains a refused upload"
+
+run_action storage_down 1 "fails when the storage host rejects the bytes" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$BUILD"
+assert_file_has "$WORK/log" "failed with HTTP 500" "explains a failed storage upload"
+
+run_action commit_rejected 1 "fails when the commit is refused" \
+  "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_APP_BINARY_PATH="$BUILD"
+assert_file_has "$WORK/log" "could not finish the binary upload" "explains a refused commit"
 
 run_action green 0 "runs a mobile session several checks at a time" \
   "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_MOBILE_BROWSER=true \
