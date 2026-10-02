@@ -155,16 +155,6 @@ else
     die "app-package runs an app already installed on one device, so it needs device-serial."
   fi
 
-  # The API rejects a non-positive value with a 400 after it has already saved the
-  # setup instruction, leaving an orphan behind, so settle it here first.
-  if [[ -n "$AQ_MAX_CONCURRENCY" ]]; then
-    if [[ ! "$AQ_MAX_CONCURRENCY" =~ ^[1-9][0-9]*$ ]]; then
-      die "max-concurrency must be a positive integer, got '$AQ_MAX_CONCURRENCY'."
-    fi
-    if [[ -n "$AQ_DEVICE_SERIAL" ]]; then
-      echo "::warning::max-concurrency is ignored when device-serial pins one device."
-    fi
-  fi
   if [[ -n "$AQ_DEVICE_LOCATION" && -n "$AQ_DEVICE_SERIAL" ]]; then
     echo "::warning::device-location narrows auto-selection and is ignored when device-serial is set."
   fi
@@ -251,7 +241,6 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
     --arg artifact "$AQ_APP_BINARY_ID" \
     --arg package "$AQ_APP_PACKAGE" \
     --arg prereq "$AQ_PREREQUISITES" \
-    --arg conc "$AQ_MAX_CONCURRENCY" \
     --argjson browser "$browser_json" '
     {test_session: (
       {name: $name, check_suite_id: $suite, product_id: $product}
@@ -272,7 +261,6 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
       + (if $package  != "" then {app_package: $package}          else {} end)
       + (if $browser        then {mobile_browser: true}           else {} end)
       + (if $prereq   != "" then {prerequisites: $prereq}         else {} end)
-      + (if $conc     != "" then {max_concurrency: ($conc | tonumber)} else {} end)
     )}')
 else
   if is_true "$AQ_USE_REPLAYS"; then replays_json=true; else replays_json=false; fi
