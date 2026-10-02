@@ -128,10 +128,6 @@ inputs:
     description: 'Free-form setup notes to run before the checks, e.g. login steps (mobile only).'
     required: false
     default: ''
-  max-concurrency:
-    description: 'How many checks to run at once, each on its own device (mobile only). Capped by the installation Device Quota and by the number of checks in the suite; the session refuses to start if the device farm cannot supply that many. Ignored when device-serial pins a single device. Defaults to the installation setting.'
-    required: false
-    default: ''
 
   results-settle-seconds:
     description: 'How long to keep re-reading results after the session finishes, until the set stops changing. Guards against reporting a partial run.'
@@ -205,4 +201,3 @@ runs:
         AQ_APP_PACKAGE: ${{ inputs.app-package }}
         AQ_MOBILE_BROWSER: ${{ inputs.mobile-browser }}
         AQ_PREREQUISITES: ${{ inputs.prerequisites }}
-        AQ_MAX_CONCURRENCY: ${{ inputs.max-concurrency }}
