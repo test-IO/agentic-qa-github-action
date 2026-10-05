@@ -22,26 +22,29 @@ stop_stub() {
   wait "$STUB_PID" 2>/dev/null || true
 }
 
+ACTION_ENV=(
+  GITHUB_OUTPUT="$WORK/output" GITHUB_STEP_SUMMARY="$WORK/summary"
+  GITHUB_WORKFLOW="CI" GITHUB_SHA="abc1234567" GITHUB_RUN_NUMBER="14"
+  AQ_HOST="$BASE" AQ_TOKEN="secret-token" AQ_PROJECT_ID="proj-1"
+  AQ_CHECK_SUITE_ID="suite-1" AQ_URL="https://staging.example.com" AQ_ENVIRONMENT_ID=""
+  AQ_SESSION_NAME="" AQ_WORKFLOW_TYPE="web" AQ_BROWSER_TYPE="chrome" AQ_VIEWPORT="1280x800"
+  AQ_USE_REPLAYS="false" AQ_AWAIT_COMPLETION="true" AQ_CONTINUE_ON_FAILURE="false"
+  AQ_FAIL_ON_BLOCKED="true" AQ_TIMEOUT_SECONDS="60" AQ_POLL_INTERVAL_SECONDS="1"
+  AQ_JUNIT_PATH="$WORK/report.xml"
+  AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM=""
+  AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND=""
+  AQ_APP_BINARY_ID="" AQ_APP_BINARY_PATH="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES=""
+  AQ_DEVICE_LOCATION=""
+  AQ_PROXY_CONFIG_ID="" AQ_RESULTS_SETTLE_SECONDS="30"
+)
+
 # run_action <mode> <expected-exit> <label> [EXTRA_ENV=...]
 run_action() {
   local mode="$1" expected="$2" label="$3"; shift 3
   start_stub "$mode"
   : > "$WORK/output"; : > "$WORK/summary"
-  env \
-    GITHUB_OUTPUT="$WORK/output" GITHUB_STEP_SUMMARY="$WORK/summary" \
-    GITHUB_WORKFLOW="CI" GITHUB_SHA="abc1234567" GITHUB_RUN_NUMBER="14" \
-    AQ_HOST="$BASE" AQ_TOKEN="secret-token" AQ_PROJECT_ID="proj-1" \
-    AQ_CHECK_SUITE_ID="suite-1" AQ_URL="https://staging.example.com" AQ_ENVIRONMENT_ID="" \
-    AQ_SESSION_NAME="" AQ_WORKFLOW_TYPE="web" AQ_BROWSER_TYPE="chrome" AQ_VIEWPORT="1280x800" \
-    AQ_USE_REPLAYS="false" AQ_AWAIT_COMPLETION="true" AQ_CONTINUE_ON_FAILURE="false" \
-    AQ_FAIL_ON_BLOCKED="true" AQ_TIMEOUT_SECONDS="60" AQ_POLL_INTERVAL_SECONDS="1" \
-    AQ_JUNIT_PATH="$WORK/report.xml" \
-    AQ_CHANNEL="web" AQ_PRODUCT_ID="" AQ_DEVICE_SERIAL="" AQ_DEVICE_PLATFORM="" \
-    AQ_DEVICE_TYPE="" AQ_OS_VERSION="" AQ_MANUFACTURER="" AQ_DEVICE_BACKEND="" \
-    AQ_APP_BINARY_ID="" AQ_APP_BINARY_PATH="" AQ_APP_PACKAGE="" AQ_MOBILE_BROWSER="false" AQ_PREREQUISITES="" \
-    AQ_DEVICE_LOCATION="" \
-    AQ_PROXY_CONFIG_ID="" AQ_RESULTS_SETTLE_SECONDS="30" \
-    "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
+  rm -f "$WORK/cancel_path"
+  env "${ACTION_ENV[@]}" "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
   # shellcheck disable=SC2319  # $? is the run above; `local rc` would reset it
   local rc=$?
   stop_stub
@@ -86,12 +89,24 @@ assert_file_has "$WORK/report.xml" "&lt;Submit&gt;" "escapes XML in check output
 assert_file_has "$WORK/report.xml" 'time="12"' "records per-check duration"
 
 run_action green 0 "passes the build when every check passes"
+if [[ -e "$WORK/cancel_path" ]]; then
+  echo "FAIL leaves a finished session alone"
+  fail=$((fail + 1))
+else
+  echo "ok   leaves a finished session alone"
+  pass=$((pass + 1))
+fi
 run_action mixed 0 "honours continue-on-failure"   AQ_CONTINUE_ON_FAILURE=true
 run_action blocked 0 "ignores blocked when fail-on-blocked is false" AQ_FAIL_ON_BLOCKED=false
 run_action blocked 1 "fails on blocked by default"
 run_action mixed 0 "skips waiting when await-completion is false" AQ_AWAIT_COMPLETION=false
 run_action mixed 1 "rejects a missing url and environment-id" AQ_URL=
 run_action mixed 1 "times out instead of hanging" AQ_TIMEOUT_SECONDS=0
+assert_file_has "$WORK/cancel_path" "/projects/proj-1/test_sessions/sess-1/cancel" "cancels the session it gave up on"
+assert_file_has "$WORK/log" "Cancelled session sess-1." "says the session was cancelled"
+
+run_action no_cancel 1 "still fails a timeout when the session cannot be cancelled" AQ_TIMEOUT_SECONDS=0
+assert_file_has "$WORK/log" "::warning::could not cancel the session: Resource not found" "warns that the session is still running"
 run_action expired 1 "reports an expired token"
 run_action empty 1 "fails when the suite produced no checks"
 
@@ -244,6 +259,40 @@ run_action green 1 "rejects an unknown channel" AQ_CHANNEL=desktop
 run_action validation 1 "surfaces a validation error from the API" \
   "${MOBILE_BASE[@]}" AQ_DEVICE_SERIAL=ABC123 AQ_MOBILE_BROWSER=true
 assert_file_has "$WORK/log" "device_serial: is not a known device" "flattens a validation error object"
+
+# --- cancelling the GitHub run ---
+
+# Run action.yml's run line the way the runner does. On cancel the runner sends
+# SIGINT to that one process, not to its children.
+sed -n 's/^ *run: //p' "$ROOT/action.yml" | sed "s|\${{ github.action_path }}|$ROOT|" > "$WORK/step.sh"
+rm -f "$WORK/cancel_path"
+start_stub endless
+# Without job control a background job starts with SIGINT ignored, and bash
+# cannot trap a signal it inherits as ignored.
+set -m
+env "${ACTION_ENV[@]}" AQ_POLL_INTERVAL_SECONDS=30 \
+  bash --noprofile --norc -eo pipefail "$WORK/step.sh" > "$WORK/log" 2>&1 &
+step_pid=$!
+set +m
+for _ in $(seq 50); do
+  grep -qF "running ..." "$WORK/log" && break
+  sleep 0.2
+done
+kill -INT "$step_pid"
+signalled_at=$SECONDS
+wait "$step_pid"
+rc=$?
+stop_stub
+if [[ "$rc" == 130 ]] && (( SECONDS - signalled_at < 5 )); then
+  echo "ok   stops mid-poll when the runner sends SIGINT"
+  pass=$((pass + 1))
+else
+  echo "FAIL stops mid-poll when the runner sends SIGINT — exit $rc after $(( SECONDS - signalled_at ))s"
+  sed 's/^/       /' "$WORK/log"
+  fail=$((fail + 1))
+fi
+assert_file_has "$WORK/cancel_path" "/projects/proj-1/test_sessions/sess-1/cancel" \
+  "cancels the session when the GitHub run is cancelled"
 
 echo
 echo "$pass passed, $fail failed"

@@ -77,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
                     check("Login works", "passed", "ok"), check("Slow one", "running")]})
             return self.reply(200, {"check_executions": RESULTS.get(MODE, [])})
         polls["n"] += 1
-        status = "running" if polls["n"] < 2 else "completed"
+        status = "running" if MODE == "endless" or polls["n"] < 2 else "completed"
         return self.reply(200, {"test_session": {"id": "sess-1", "status": status}})
 
     def do_POST(self):
@@ -85,6 +85,12 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or "{}")
         if self.path.endswith("/run"):
             return self.reply(200, {"test_session": {"id": "sess-1", "status": "started"}})
+        if self.path.endswith("/cancel"):
+            with open(os.path.join(WORK, "cancel_path"), "w") as handle:
+                handle.write(self.path)
+            if MODE == "no_cancel":
+                return self.reply(404, {"error": "Resource not found"})
+            return self.reply(200, {"test_session": {"id": "sess-1", "status": "cancelled"}})
         if self.path.endswith("/mobile_binary_files/initiate_upload"):
             with open(os.path.join(WORK, "initiate.json"), "w") as handle:
                 json.dump(body, handle, indent=2)
