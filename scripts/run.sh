@@ -50,8 +50,8 @@ is_true() { [[ "${1,,}" == "true" ]]; }
 API_STATUS=""
 API_BODY=""
 
-api() {
-  local method="$1" path="$2" data="${3:-}"
+try_api() {
+  local method="$1" path="$2" data="${3:-}" max_time="${4:-60}"
   local body_file
   body_file=$(mktemp)
   local -a args=(
@@ -59,17 +59,21 @@ api() {
     -X "$method"
     -H "Authorization: ApiKey $AQ_TOKEN"
     -H 'Accept: application/json'
-    --max-time 60
+    --max-time "$max_time"
   )
   if [[ -n "$data" ]]; then
     args+=(-H 'Content-Type: application/json' -d "$data")
   fi
   if ! API_STATUS=$(curl "${args[@]}" "$HOST$path" 2>&1); then
     rm -f "$body_file"
-    die "could not reach $HOST — check the host input and that the runner can reach it."
+    return 1
   fi
   API_BODY=$(cat "$body_file")
   rm -f "$body_file"
+}
+
+api() {
+  try_api "$@" || die "could not reach $HOST — check the host input and that the runner can reach it."
 }
 
 api_error() {
@@ -304,6 +308,27 @@ SESSION_URL="$HOST/test_sessions/$SESSION_ID"
 echo "Created session $SESSION_ID"
 echo "$SESSION_URL"
 
+# GitHub sends SIGTERM 7.5s after SIGINT and kills the step 2.5s later, so the
+# cancel call gets a short timeout.
+cancel_session() {
+  if ! try_api POST "/api/v1/projects/$AQ_PROJECT_ID/test_sessions/$SESSION_ID/cancel" "" 5; then
+    echo "::warning::could not reach $HOST to cancel the session. Stop it in the UI: $SESSION_URL"
+  elif [[ "$API_STATUS" == "200" ]]; then
+    echo "Cancelled session $SESSION_ID."
+  else
+    echo "::warning::could not cancel the session: $(api_error). Stop it in the UI: $SESSION_URL"
+  fi
+}
+
+on_stop() {
+  trap '' INT TERM
+  echo "The run was cancelled."
+  cancel_session
+  exit "$1"
+}
+trap 'on_stop 130' INT
+trap 'on_stop 143' TERM
+
 api POST "/api/v1/projects/$AQ_PROJECT_ID/test_sessions/$SESSION_ID/run"
 [[ "$API_STATUS" == "200" ]] || die "could not start the session: $(api_error)"
 echo "Started."
@@ -337,8 +362,15 @@ while :; do
     break
   fi
   echo "  $status ..."
-  sleep "$AQ_POLL_INTERVAL_SECONDS"
+  # A foreground sleep holds off the trap until it ends; wait does not. The
+  # redirect stops a sleep left behind by the trap from holding the step's output.
+  sleep "$AQ_POLL_INTERVAL_SECONDS" >/dev/null 2>&1 &
+  wait $!
 done
+
+if ! $timed_out; then
+  trap - INT TERM
+fi
 
 RESULTS=""
 count_state() { jq --arg s "$1" '[.check_executions[] | select(.state == $s)] | length' <<<"$RESULTS"; }
@@ -469,7 +501,8 @@ echo "passed=$passed failed=$failed blocked=$blocked total=$total"
 # blocked checks; it must not suppress a set we already know is partial, or a
 # truncated run reaches the branch as a green build.
 if $timed_out; then
-  die "the session did not finish within ${AQ_TIMEOUT_SECONDS}s, so these counts cover only the $total check(s) that existed at the deadline. It is still running — the API has no cancel endpoint, so stop it in the UI: $SESSION_URL"
+  cancel_session
+  die "the session did not finish within ${AQ_TIMEOUT_SECONDS}s, so these counts cover only the $total check(s) that existed at the deadline. $SESSION_URL"
 fi
 
 if (( total == 0 )); then

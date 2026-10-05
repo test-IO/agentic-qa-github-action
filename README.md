@@ -115,7 +115,7 @@ Both channels take these:
 | `await-completion` | | `true` | Wait for results. `false` starts the run and exits |
 | `continue-on-failure` | | `false` | Report failing and blocked checks but always exit 0. Does not cover an incomplete result set |
 | `fail-on-blocked` | | `true` | Treat blocked checks as failures |
-| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole suite — a 23-check web suite takes about an hour, and a mobile suite finishes sooner the more checks the installation runs at once |
+| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole suite — a 23-check web suite takes about an hour, and a mobile suite finishes sooner the more checks the installation runs at once. When it runs out, the session is cancelled |
 | `poll-interval-seconds` | | `15` | Seconds between status polls |
 | `results-settle-seconds` | | `60` | How long to re-read results after the session finishes, until the set stops changing |
 | `junit-path` | | | Write a JUnit XML report here |
@@ -553,7 +553,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 **Tokens expire after one month.** This is fixed on the platform side, and there is no renew endpoint. When a token lapses the action stops with a clear message, but someone has to mint a new one and update the secret. Put a reminder in your calendar.
 
-**Timeouts leave the session running.** The API has no cancel endpoint, so if `timeout-seconds` is reached the action gives up but the run continues on the server. Stop it from the UI using the `session-url` output. A timeout always fails the build, because the counts at that point cover only the checks that had been created so far.
+**Stopping the action cancels the session.** When `timeout-seconds` runs out, or the GitHub run is cancelled — by hand, by `concurrency: cancel-in-progress`, or by `timeout-minutes` — the action cancels the session the same way Cancel does in the UI. A timeout always fails the build, because the counts at that point cover only the checks that had been created so far. With `await-completion: false` the action has already exited, so nothing cancels the session. Installations older than the cancel endpoint answer with an error: the action warns and the session keeps running, so stop it from the UI using the `session-url` output.
 
 **Under-counted results used to pass silently.** A suite of 23 checks was once reported as 5, hiding 18 blocked checks behind a green build, because the results were read once the moment the session went `completed`. Hence the settling described under [Check results](#check-results). If you see `results still arriving` in the log, that guard is doing its job.
 
@@ -575,7 +575,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 tests/run_tests.sh
 ```
 
-The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, expired tokens, JUnit output and escaping, both channels' request bodies, the binary upload, and the mobile input validation.
+The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, cancelling, expired tokens, JUnit output and escaping, both channels' request bodies, the binary upload, and the mobile input validation.
 
 `scripts/run.sh` uses bash 4 parameter expansion, so run the tests with bash 4 or newer. That is what GitHub-hosted runners have; macOS ships bash 3.2, where you need `brew install bash` and `/opt/homebrew/bin/bash tests/run_tests.sh`.
 

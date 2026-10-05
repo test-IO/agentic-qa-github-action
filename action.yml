@@ -69,7 +69,7 @@ inputs:
     required: false
     default: 'true'
   timeout-seconds:
-    description: 'How long to wait for the session to finish. Checks run only a few at a time, so budget for the whole suite — a 23-check web suite takes about an hour. Too low and the action gives up mid-run.'
+    description: 'How long to wait for the session to finish. Checks run only a few at a time, so budget for the whole suite — a 23-check web suite takes about an hour. Too low and the action cancels the session mid-run.'
     required: false
     default: '7200'
   poll-interval-seconds:
@@ -166,7 +166,7 @@ runs:
   steps:
     - id: run
       shell: bash
-      run: ${{ github.action_path }}/scripts/run.sh
+      run: exec ${{ github.action_path }}/scripts/run.sh
       env:
         AQ_HOST: ${{ inputs.host }}
         AQ_TOKEN: ${{ inputs.token }}
