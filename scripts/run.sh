@@ -10,7 +10,14 @@ done
 [[ -n "${AQ_HOST:-}" ]]           || die "host is required."
 [[ -n "${AQ_TOKEN:-}" ]]          || die "token is required."
 [[ -n "${AQ_PROJECT_ID:-}" ]]     || die "project-id is required."
-[[ -n "${AQ_CHECK_SUITE_ID:-}" ]] || die "check-suite-id is required."
+
+: "${AQ_TEST_SET_ID:=}"
+: "${AQ_CHECK_SUITE_ID:=}"
+if [[ -n "$AQ_TEST_SET_ID" && -n "$AQ_CHECK_SUITE_ID" && "$AQ_TEST_SET_ID" != "$AQ_CHECK_SUITE_ID" ]]; then
+  die "test-set-id and check-suite-id name different test sets. Set only test-set-id; check-suite-id is its deprecated alias."
+fi
+TEST_SET_ID="${AQ_TEST_SET_ID:-$AQ_CHECK_SUITE_ID}"
+[[ -n "$TEST_SET_ID" ]] || die "test-set-id is required."
 
 echo "::add-mask::$AQ_TOKEN"
 
@@ -233,7 +240,7 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
   create_path="/api/v1/projects/$AQ_PROJECT_ID/mobile/test_sessions"
   payload=$(jq -n \
     --arg name "$session_name" \
-    --arg suite "$AQ_CHECK_SUITE_ID" \
+    --arg test_set "$TEST_SET_ID" \
     --arg product "$AQ_PRODUCT_ID" \
     --arg backend "$AQ_DEVICE_BACKEND" \
     --arg serial "$AQ_DEVICE_SERIAL" \
@@ -247,7 +254,9 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
     --arg prereq "$AQ_PREREQUISITES" \
     --argjson browser "$browser_json" '
     {test_session: (
-      {name: $name, check_suite_id: $suite, product_id: $product}
+      # check_suite_id repeats test_set_id for installations from before the Check
+      # Library API, which read only check_suite_id; newer ones ignore it
+      {name: $name, test_set_id: $test_set, check_suite_id: $test_set, product_id: $product}
       + (if $backend  != "" then {device_backend: $backend} else {} end)
       + (if $serial   != "" then {device_serial: $serial}   else {} end)
       # the server ignores search criteria once a serial is pinned, so only send
@@ -271,7 +280,7 @@ else
   create_path="/api/v1/projects/$AQ_PROJECT_ID/test_sessions"
   payload=$(jq -n \
     --arg name "$session_name" \
-    --arg suite "$AQ_CHECK_SUITE_ID" \
+    --arg test_set "$TEST_SET_ID" \
     --arg url "$AQ_URL" \
     --arg env "$AQ_ENVIRONMENT_ID" \
     --arg wtype "$AQ_WORKFLOW_TYPE" \
@@ -280,7 +289,8 @@ else
     --arg proxy "$AQ_PROXY_CONFIG_ID" \
     --argjson replays "$replays_json" '
     {test_session: (
-      {name: $name, check_suite_id: $suite, use_replays: $replays, workflow_type: $wtype}
+      # check_suite_id: see the mobile payload above
+      {name: $name, test_set_id: $test_set, check_suite_id: $test_set, use_replays: $replays, workflow_type: $wtype}
       + (if $url  != "" then {test_urls: [$url]}    else {} end)
       + (if $env  != "" then {environment_id: $env} else {} end)
       + (if $browser  != "" then {browser_type: $browser} else {} end)
@@ -453,7 +463,7 @@ if [[ -n "$AQ_JUNIT_PATH" ]]; then
       "<testsuites name=\"Agentic QA\" tests=\"\($total)\" failures=\"\($failed)\" skipped=\"\($skipped)\" time=\"\($time)\">",
       "  <testsuite name=\"Agentic QA\" tests=\"\($total)\" failures=\"\($failed)\" skipped=\"\($skipped)\" time=\"\($time)\">",
       ($ce[] |
-        "    <testcase name=\"\(.check.name | esc)\" classname=\"\(.check.check_suite_name | esc)\" time=\"\(dur)\">"
+        "    <testcase name=\"\(.check.name | esc)\" classname=\"\((.check.test_set_name // .check.check_suite_name) | esc)\" time=\"\(dur)\">"
         + (if   .state == "failed"  then "\n      <failure message=\"check failed\">\(.reasoning | esc)</failure>\n    "
            elif .state == "blocked" then "\n      <skipped message=\"blocked\"/>\n    "
            elif .state == "running" then "\n      <skipped message=\"still running when the run ended\"/>\n    "
@@ -506,7 +516,7 @@ if $timed_out; then
 fi
 
 if (( total == 0 )); then
-  die "the session finished with no check executions. Is the check suite empty? $SESSION_URL"
+  die "the session finished with no check executions. Is the test set empty? $SESSION_URL"
 fi
 
 if ! $results_settled; then

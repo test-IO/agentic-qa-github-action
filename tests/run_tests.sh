@@ -26,7 +26,7 @@ ACTION_ENV=(
   GITHUB_OUTPUT="$WORK/output" GITHUB_STEP_SUMMARY="$WORK/summary"
   GITHUB_WORKFLOW="CI" GITHUB_SHA="abc1234567" GITHUB_RUN_NUMBER="14"
   AQ_HOST="$BASE" AQ_TOKEN="secret-token" AQ_PROJECT_ID="proj-1"
-  AQ_CHECK_SUITE_ID="suite-1" AQ_URL="https://staging.example.com" AQ_ENVIRONMENT_ID=""
+  AQ_TEST_SET_ID="set-1" AQ_CHECK_SUITE_ID="" AQ_URL="https://staging.example.com" AQ_ENVIRONMENT_ID=""
   AQ_SESSION_NAME="" AQ_WORKFLOW_TYPE="web" AQ_BROWSER_TYPE="chrome" AQ_VIEWPORT="1280x800"
   AQ_USE_REPLAYS="false" AQ_AWAIT_COMPLETION="true" AQ_CONTINUE_ON_FAILURE="false"
   AQ_FAIL_ON_BLOCKED="true" AQ_TIMEOUT_SECONDS="60" AQ_POLL_INTERVAL_SECONDS="1"
@@ -77,6 +77,8 @@ assert_file_has "$WORK/summary" "| Failed | 1 |" "writes a job summary"
 assert_file_has "$WORK/payload.json" '"workflow_type": "web"' "sends workflow_type"
 assert_file_has "$WORK/payload.json" '"test_urls"' "sends test_urls"
 assert_file_has "$WORK/payload.json" '"name": "CI abc1234 #14"' "names the session with the run number"
+assert_file_has "$WORK/payload.json" '"test_set_id": "set-1"' "sends test_set_id"
+assert_file_has "$WORK/payload.json" '"check_suite_id": "set-1"' "repeats it as check_suite_id for older installations"
 
 if python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])" "$WORK/report.xml"; then
   echo "ok   writes valid JUnit XML"
@@ -87,6 +89,7 @@ else
 fi
 assert_file_has "$WORK/report.xml" "&lt;Submit&gt;" "escapes XML in check output"
 assert_file_has "$WORK/report.xml" 'time="12"' "records per-check duration"
+assert_file_has "$WORK/report.xml" 'classname="Smoke"' "names the JUnit class after the test set"
 
 run_action green 0 "passes the build when every check passes"
 if [[ -e "$WORK/cancel_path" ]]; then
@@ -108,7 +111,23 @@ assert_file_has "$WORK/log" "Cancelled session sess-1." "says the session was ca
 run_action no_cancel 1 "still fails a timeout when the session cannot be cancelled" AQ_TIMEOUT_SECONDS=0
 assert_file_has "$WORK/log" "::warning::could not cancel the session: Resource not found" "warns that the session is still running"
 run_action expired 1 "reports an expired token"
-run_action empty 1 "fails when the suite produced no checks"
+run_action empty 1 "fails when the test set produced no checks"
+
+# --- test set id ---
+
+run_action green 0 "accepts the deprecated check-suite-id" AQ_TEST_SET_ID= AQ_CHECK_SUITE_ID=suite-1
+assert_file_has "$WORK/payload.json" '"test_set_id": "suite-1"' "sends the alias as test_set_id"
+
+run_action green 0 "accepts both inputs when they name the same test set" AQ_CHECK_SUITE_ID=set-1
+
+run_action green 1 "rejects test-set-id and check-suite-id naming different test sets" AQ_CHECK_SUITE_ID=suite-1
+assert_file_has "$WORK/log" "name different test sets" "explains the conflicting ids"
+
+run_action green 1 "rejects a missing test-set-id" AQ_TEST_SET_ID=
+assert_file_has "$WORK/log" "test-set-id is required" "asks for test-set-id"
+
+run_action legacy_names 0 "reads the test set name from older installations"
+assert_file_has "$WORK/report.xml" 'classname="Smoke"' "falls back to check_suite_name for the JUnit class"
 
 # --- result settling ---
 
@@ -156,6 +175,8 @@ assert_file_has "$WORK/create_path" "/mobile/test_sessions" "posts to the mobile
 assert_file_has "$WORK/payload.json" '"product_id": "prod-1"'         "sends product_id"
 assert_file_has "$WORK/payload.json" '"device_serial": "ABC123"'      "sends the pinned serial"
 assert_file_has "$WORK/payload.json" '"selected_artifact_id": "bin-1"' "sends the binary id"
+assert_file_has "$WORK/payload.json" '"test_set_id": "set-1"'         "sends test_set_id on mobile"
+assert_file_has "$WORK/payload.json" '"check_suite_id": "set-1"'      "repeats it as check_suite_id on mobile"
 
 run_action green 0 "runs a mobile session on an auto-selected device" \
   "${MOBILE_BASE[@]}" AQ_DEVICE_PLATFORM=android AQ_DEVICE_TYPE=phone AQ_OS_VERSION=14 \
