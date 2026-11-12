@@ -112,7 +112,7 @@ Both channels take these:
 | `token` | yes | | API token |
 | `project-id` | yes | | Project UUID |
 | `test-set-id` | yes | | Test set UUID |
-| `check-suite-id` | | | Deprecated alias of `test-set-id` (same UUID), kept so existing workflows keep running. GitHub logs a deprecation warning when it is used |
+| `check-suite-id` | | | Deprecated alias of `test-set-id` (same UUID), kept so existing workflows keep running |
 | `channel` | | `web` | `web` or `mobile` |
 | `session-name` | | workflow name, short SHA and run number | Display name for the session |
 | `await-completion` | | `true` | Wait for results. `false` starts the run and exits |
@@ -554,7 +554,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 ## Things to know
 
-**Check suites are called test sets now.** Since the Check Library API release the product calls them test sets, and `test-set-id` replaces `check-suite-id` with the same UUID. `check-suite-id` still works as a deprecated alias; GitHub logs a warning when a workflow uses it. The action sends the id both ways, as `test_set_id` and as the legacy `check_suite_id`, so one version of the action works against installations on either side of that release. The JUnit class name is the test set name (`check_suite_name` on older installations).
+**Check suites are called test sets now.** Since the Check Library API release, `test-set-id` replaces `check-suite-id` and takes the same UUID. `check-suite-id` still works as a deprecated alias; GitHub logs a warning when a workflow uses it. Repository variables keep working: a workflow set up with `AGENTIC_QA_SUITE` can pass it as `test-set-id`. The action sends the id as both `test_set_id` and `check_suite_id`, so one version of the action works against installations on either side of that release.
 
 **Tokens expire after one month.** This is fixed on the platform side, and there is no renew endpoint. When a token lapses the action stops with a clear message, but someone has to mint a new one and update the secret. Put a reminder in your calendar.
 
@@ -580,7 +580,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 tests/run_tests.sh
 ```
 
-The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, cancelling, expired tokens, JUnit output and escaping, both channels' request bodies (including the test set id and its deprecated alias), the binary upload, and the mobile input validation.
+The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, cancelling, expired tokens, JUnit output and escaping, both channels' request bodies, the test set id and its deprecated alias, the binary upload, and the mobile input validation.
 
 `scripts/run.sh` uses bash 4 parameter expansion, so run the tests with bash 4 or newer. That is what GitHub-hosted runners have; macOS ships bash 3.2, where you need `brew install bash` and `/opt/homebrew/bin/bash tests/run_tests.sh`.
 

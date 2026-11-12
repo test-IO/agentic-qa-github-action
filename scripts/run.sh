@@ -7,17 +7,16 @@ for bin in curl jq; do
   command -v "$bin" >/dev/null 2>&1 || die "$bin is required but not installed on this runner."
 done
 
+: "${AQ_CHECK_SUITE_ID:=}"
+: "${AQ_TEST_SET_ID:=$AQ_CHECK_SUITE_ID}"
+
 [[ -n "${AQ_HOST:-}" ]]           || die "host is required."
 [[ -n "${AQ_TOKEN:-}" ]]          || die "token is required."
 [[ -n "${AQ_PROJECT_ID:-}" ]]     || die "project-id is required."
-
-: "${AQ_TEST_SET_ID:=}"
-: "${AQ_CHECK_SUITE_ID:=}"
-if [[ -n "$AQ_TEST_SET_ID" && -n "$AQ_CHECK_SUITE_ID" && "$AQ_TEST_SET_ID" != "$AQ_CHECK_SUITE_ID" ]]; then
+[[ -n "${AQ_TEST_SET_ID:-}" ]]    || die "test-set-id is required."
+if [[ -n "$AQ_CHECK_SUITE_ID" && "$AQ_CHECK_SUITE_ID" != "$AQ_TEST_SET_ID" ]]; then
   die "test-set-id and check-suite-id name different test sets. Set only test-set-id; check-suite-id is its deprecated alias."
 fi
-TEST_SET_ID="${AQ_TEST_SET_ID:-$AQ_CHECK_SUITE_ID}"
-[[ -n "$TEST_SET_ID" ]] || die "test-set-id is required."
 
 echo "::add-mask::$AQ_TOKEN"
 
@@ -240,7 +239,7 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
   create_path="/api/v1/projects/$AQ_PROJECT_ID/mobile/test_sessions"
   payload=$(jq -n \
     --arg name "$session_name" \
-    --arg test_set "$TEST_SET_ID" \
+    --arg test_set "$AQ_TEST_SET_ID" \
     --arg product "$AQ_PRODUCT_ID" \
     --arg backend "$AQ_DEVICE_BACKEND" \
     --arg serial "$AQ_DEVICE_SERIAL" \
@@ -254,8 +253,8 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
     --arg prereq "$AQ_PREREQUISITES" \
     --argjson browser "$browser_json" '
     {test_session: (
-      # check_suite_id repeats test_set_id for installations from before the Check
-      # Library API, which read only check_suite_id; newer ones ignore it
+      # check_suite_id repeats test_set_id for installations from before the
+      # Check Library API, which read only check_suite_id; newer ones ignore it
       {name: $name, test_set_id: $test_set, check_suite_id: $test_set, product_id: $product}
       + (if $backend  != "" then {device_backend: $backend} else {} end)
       + (if $serial   != "" then {device_serial: $serial}   else {} end)
@@ -280,7 +279,7 @@ else
   create_path="/api/v1/projects/$AQ_PROJECT_ID/test_sessions"
   payload=$(jq -n \
     --arg name "$session_name" \
-    --arg test_set "$TEST_SET_ID" \
+    --arg test_set "$AQ_TEST_SET_ID" \
     --arg url "$AQ_URL" \
     --arg env "$AQ_ENVIRONMENT_ID" \
     --arg wtype "$AQ_WORKFLOW_TYPE" \
@@ -393,13 +392,13 @@ read_results() {
 
 # The session status is derived from its workflow executions alone, so it can turn
 # terminal while check executions are still being written — one read then reports a
-# partial run as final (a suite of 23 was once reported as 5, with 18 blocked checks
-# missing). Re-read until the set stops growing and nothing is still running.
+# partial run as final (a test set of 23 was once reported as 5, with 18 blocked
+# checks missing). Re-read until the set stops growing and nothing is still running.
 #
 # Only a terminal session can settle. A running one has lulls — the gap between one
 # check ending and the next being created leaves the set briefly stable with nothing
-# running — and mistaking a lull for the end is how a 23-check suite gets reported as
-# the 14 that happened to exist when we gave up waiting.
+# running — and mistaking a lull for the end is how a 23-check test set gets
+# reported as the 14 that happened to exist when we gave up waiting.
 results_settled=false
 
 if $timed_out; then

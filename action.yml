@@ -21,10 +21,10 @@ inputs:
     required: false
     default: ''
   check-suite-id:
-    description: 'Deprecated alias of test-set-id, kept so existing workflows keep running. Check suites are called test sets now; the UUID is the same.'
+    description: 'Deprecated alias of test-set-id (same UUID), kept so existing workflows keep running.'
     required: false
     default: ''
-    deprecationMessage: 'check-suite-id is deprecated. Use test-set-id with the same UUID.'
+    deprecationMessage: 'Use test-set-id with the same UUID.'
   channel:
     description: 'web or mobile. Mobile runs on a device and needs product-id plus a device and an app source.'
     required: false
