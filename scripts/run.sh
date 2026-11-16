@@ -7,7 +7,9 @@ for bin in curl jq; do
   command -v "$bin" >/dev/null 2>&1 || die "$bin is required but not installed on this runner."
 done
 
-: "${AQ_CHECK_SUITE_ID:=}"
+: "${AQ_CHECK_SUITE_ID:=}" "${AQ_TEST_SET_ID:=}"
+AQ_CHECK_SUITE_ID="${AQ_CHECK_SUITE_ID//[[:space:]]/}"
+AQ_TEST_SET_ID="${AQ_TEST_SET_ID//[[:space:]]/}"
 : "${AQ_TEST_SET_ID:=$AQ_CHECK_SUITE_ID}"
 
 [[ -n "${AQ_HOST:-}" ]]           || die "host is required."

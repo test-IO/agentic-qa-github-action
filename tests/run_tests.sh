@@ -43,7 +43,7 @@ run_action() {
   local mode="$1" expected="$2" label="$3"; shift 3
   start_stub "$mode"
   : > "$WORK/output"; : > "$WORK/summary"
-  rm -f "$WORK/cancel_path"
+  rm -f "$WORK/cancel_path" "$WORK/payload.json"
   env "${ACTION_ENV[@]}" "$@" bash "$ROOT/scripts/run.sh" > "$WORK/log" 2>&1
   # shellcheck disable=SC2319  # $? is the run above; `local rc` would reset it
   local rc=$?
@@ -119,6 +119,9 @@ run_action green 0 "accepts the deprecated check-suite-id" AQ_TEST_SET_ID= AQ_CH
 assert_file_has "$WORK/payload.json" '"test_set_id": "suite-1"' "sends the alias as test_set_id"
 
 run_action green 0 "accepts both inputs when they name the same test set" AQ_CHECK_SUITE_ID=set-1
+
+run_action green 0 "ignores whitespace around the ids when comparing them" AQ_TEST_SET_ID=$'set-1\n' AQ_CHECK_SUITE_ID=" set-1"
+assert_file_has "$WORK/payload.json" '"test_set_id": "set-1"' "sends the id without the whitespace"
 
 run_action green 1 "rejects test-set-id and check-suite-id naming different test sets" AQ_CHECK_SUITE_ID=suite-1
 assert_file_has "$WORK/log" "name different test sets" "explains the conflicting ids"
