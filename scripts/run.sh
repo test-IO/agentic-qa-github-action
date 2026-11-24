@@ -255,8 +255,7 @@ if [[ "$AQ_CHANNEL" == "mobile" ]]; then
     --arg prereq "$AQ_PREREQUISITES" \
     --argjson browser "$browser_json" '
     {test_session: (
-      # check_suite_id repeats test_set_id for installations from before the
-      # Check Library API, which read only check_suite_id; newer ones ignore it
+      # installations before the Check Library API read only check_suite_id
       {name: $name, test_set_id: $test_set, check_suite_id: $test_set, product_id: $product}
       + (if $backend  != "" then {device_backend: $backend} else {} end)
       + (if $serial   != "" then {device_serial: $serial}   else {} end)
@@ -290,7 +289,6 @@ else
     --arg proxy "$AQ_PROXY_CONFIG_ID" \
     --argjson replays "$replays_json" '
     {test_session: (
-      # check_suite_id: see the mobile payload above
       {name: $name, test_set_id: $test_set, check_suite_id: $test_set, use_replays: $replays, workflow_type: $wtype}
       + (if $url  != "" then {test_urls: [$url]}    else {} end)
       + (if $env  != "" then {environment_id: $env} else {} end)
