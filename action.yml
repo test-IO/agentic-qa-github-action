@@ -1,5 +1,5 @@
 name: 'Agentic QA'
-description: 'Run an Agentic QA check suite against a URL or a mobile device and fail the build when checks fail.'
+description: 'Run an Agentic QA test set against a URL or a mobile device and fail the build when checks fail.'
 author: 'test-io'
 
 branding:
@@ -14,11 +14,17 @@ inputs:
     description: 'API token. Create it under System Configuration -> API / MCP Config, then store it as a secret.'
     required: true
   project-id:
-    description: 'UUID of the project that owns the check suite.'
+    description: 'UUID of the project that owns the test set.'
     required: true
+  test-set-id:
+    description: 'UUID of the test set to run. Required unless the deprecated check-suite-id is set.'
+    required: false
+    default: ''
   check-suite-id:
-    description: 'UUID of the check suite to run.'
-    required: true
+    description: 'Deprecated alias of test-set-id (same UUID), kept so existing workflows keep running.'
+    required: false
+    default: ''
+    deprecationMessage: 'Use test-set-id with the same UUID.'
   channel:
     description: 'web or mobile. Mobile runs on a device and needs product-id plus a device and an app source.'
     required: false
@@ -69,7 +75,7 @@ inputs:
     required: false
     default: 'true'
   timeout-seconds:
-    description: 'How long to wait for the session to finish. Checks run only a few at a time, so budget for the whole suite — a 23-check web suite takes about an hour. Too low and the action cancels the session mid-run.'
+    description: 'How long to wait for the session to finish. Checks run only a few at a time, so budget for the whole test set — a 23-check web test set takes about an hour. Too low and the action cancels the session mid-run.'
     required: false
     default: '7200'
   poll-interval-seconds:
@@ -171,6 +177,7 @@ runs:
         AQ_HOST: ${{ inputs.host }}
         AQ_TOKEN: ${{ inputs.token }}
         AQ_PROJECT_ID: ${{ inputs.project-id }}
+        AQ_TEST_SET_ID: ${{ inputs.test-set-id }}
         AQ_CHECK_SUITE_ID: ${{ inputs.check-suite-id }}
         AQ_URL: ${{ inputs.url }}
         AQ_ENVIRONMENT_ID: ${{ inputs.environment-id }}

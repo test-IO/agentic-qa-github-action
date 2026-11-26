@@ -9,14 +9,14 @@ PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8771
 WORK = sys.argv[3] if len(sys.argv) > 3 else "/tmp"
 
 
-def check(name, state, reasoning=None, seconds=12):
+def check(name, state, reasoning=None, seconds=12, set_name_key="test_set_name"):
     return {
         "id": name,
         "state": state,
         "reasoning": reasoning,
         "created_at": "2026-09-02T10:00:00Z",
         "updated_at": "2026-09-02T10:00:%02dZ" % seconds,
-        "check": {"name": name, "check_suite_name": "Smoke"},
+        "check": {"name": name, set_name_key: "Smoke"},
     }
 
 
@@ -29,6 +29,7 @@ RESULTS = {
     "green": [check("Login works", "passed", "ok"), check("Checkout", "passed", "ok")],
     "blocked": [check("Login works", "passed", "ok"), check("Search", "blocked")],
     "empty": [],
+    "legacy_names": [check("Login works", "passed", "ok", set_name_key="check_suite_name")],
 }
 
 GROWING = [

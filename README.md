@@ -1,6 +1,6 @@
 # Agentic QA GitHub Action
 
-Run an [Agentic QA](https://test.io/ai-in-qa/agentic-qa) check suite from a workflow and fail the build when checks fail.
+Run an [Agentic QA](https://test.io/ai-in-qa/agentic-qa) test set from a workflow and fail the build when checks fail.
 
 The action creates a test session on your installation, starts it, waits for it to finish, and turns the per-check results into a build result, a job summary, and optionally a JUnit report.
 
@@ -10,11 +10,11 @@ The action creates a test session on your installation, starts it, waits for it 
     host: ${{ vars.AGENTIC_QA_HOST }}
     token: ${{ secrets.AGENTIC_QA_TOKEN }}
     project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-    check-suite-id: ${{ vars.AGENTIC_QA_SUITE }}
+    test-set-id: ${{ vars.AGENTIC_QA_TEST_SET }}
     url: https://staging.example.com
 ```
 
-It runs a web suite against a URL by default. Set `channel: mobile` to run a mobile suite on a real device instead — see [Mobile runs](#mobile-runs).
+It runs a web test set against a URL by default. Set `channel: mobile` to run a mobile test set on a real device instead — see [Mobile runs](#mobile-runs).
 
 Agentic QA is single-tenant: every customer runs their own installation, so `host` is always yours.
 
@@ -28,8 +28,10 @@ Agentic QA is single-tenant: every customer runs their own installation, so `hos
 
 ```bash
 curl -s "$HOST/api/v1/projects" -H "Authorization: ApiKey $TOKEN" | jq '.projects[] | {id, name}'
-curl -s "$HOST/api/v1/projects/$PROJECT_ID/check_suites" -H "Authorization: ApiKey $TOKEN" | jq '.check_suites[] | {id, name}'
+curl -s "$HOST/api/v1/projects/$PROJECT_ID/test_sets" -H "Authorization: ApiKey $TOKEN" | jq '.test_sets[] | {id, name}'
 ```
+
+Installations from before the Check Library API release have no `/test_sets` endpoint yet; list the same IDs at `/check_suites` (`.check_suites[]`) there.
 
 For a mobile run you also need the product, and the binary if you install one:
 
@@ -62,7 +64,7 @@ An empty list means the installation has none yet, and nothing in the API can ad
 | `AGENTIC_QA_TOKEN` | secret | the token from step 2 |
 | `AGENTIC_QA_HOST` | variable | `https://your-installation.example.com` |
 | `AGENTIC_QA_PROJECT` | variable | project UUID |
-| `AGENTIC_QA_SUITE` | variable | check suite UUID |
+| `AGENTIC_QA_TEST_SET` | variable | test set UUID |
 
 ### Adding them in the web UI
 
@@ -82,7 +84,7 @@ For the **secret**:
 3. Fill in **Name** and **Secret**.
 4. Click **Add secret**.
 
-Store the optional IDs the same way when you use them — `AGENTIC_QA_PROXY` for a proxy config, `AGENTIC_QA_MOBILE_PRODUCT`, `AGENTIC_QA_MOBILE_SUITE` and `AGENTIC_QA_APP_BINARY` for a mobile run. They are ordinary variables; only the token needs to be a secret.
+Store the optional IDs the same way when you use them — `AGENTIC_QA_PROXY` for a proxy config, `AGENTIC_QA_MOBILE_PRODUCT`, `AGENTIC_QA_MOBILE_TEST_SET` and `AGENTIC_QA_APP_BINARY` for a mobile run. They are ordinary variables; only the token needs to be a secret.
 
 A secret cannot be read back afterwards — you can only overwrite it. Variable names accept letters, digits and underscores, must not start with a digit or with `GITHUB_`, and are matched case-insensitively.
 
@@ -91,9 +93,9 @@ You need admin rights on the repository. If several repositories share one insta
 ### Or from the command line
 
 ```bash
-gh variable set AGENTIC_QA_HOST    --repo OWNER/REPO --body "https://your-installation.example.com"
-gh variable set AGENTIC_QA_PROJECT --repo OWNER/REPO --body "PROJECT_UUID"
-gh variable set AGENTIC_QA_SUITE   --repo OWNER/REPO --body "SUITE_UUID"
+gh variable set AGENTIC_QA_HOST     --repo OWNER/REPO --body "https://your-installation.example.com"
+gh variable set AGENTIC_QA_PROJECT  --repo OWNER/REPO --body "PROJECT_UUID"
+gh variable set AGENTIC_QA_TEST_SET --repo OWNER/REPO --body "TEST_SET_UUID"
 
 gh secret set AGENTIC_QA_TOKEN --repo OWNER/REPO
 ```
@@ -109,13 +111,14 @@ Both channels take these:
 | `host` | yes | | Base URL of your installation |
 | `token` | yes | | API token |
 | `project-id` | yes | | Project UUID |
-| `check-suite-id` | yes | | Check suite UUID |
+| `test-set-id` | yes | | Test set UUID |
+| `check-suite-id` | | | Deprecated alias of `test-set-id` (same UUID), kept so existing workflows keep running |
 | `channel` | | `web` | `web` or `mobile` |
 | `session-name` | | workflow name, short SHA and run number | Display name for the session |
 | `await-completion` | | `true` | Wait for results. `false` starts the run and exits |
 | `continue-on-failure` | | `false` | Report failing and blocked checks but always exit 0. Does not cover an incomplete result set |
 | `fail-on-blocked` | | `true` | Treat blocked checks as failures |
-| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole suite — a 23-check web suite takes about an hour, and a mobile suite finishes sooner the more checks the installation runs at once. When it runs out, the session is cancelled |
+| `timeout-seconds` | | `7200` | How long to wait. Budget for the whole test set — a 23-check web test set takes about an hour, and a mobile test set finishes sooner the more checks the installation runs at once. When it runs out, the session is cancelled |
 | `poll-interval-seconds` | | `15` | Seconds between status polls |
 | `results-settle-seconds` | | `60` | How long to re-read results after the session finishes, until the set stops changing |
 | `junit-path` | | | Write a JUnit XML report here |
@@ -167,7 +170,7 @@ A mobile run needs `channel: mobile`, a `product-id` for a mobile product, and t
 
 The action rejects zero sources and more than one. The API treats an unset source as "install a binary" and only notices the missing upload at start time, which would leave you a session that cannot run, so it is settled before anything is created.
 
-**How many at a time.** The installation decides, not the action: its mobile workflow's Max Concurrency / Session setting is how many checks run in parallel, each on its own device. The installation books a pool of devices when the session starts, runs one check per device, and hands each device to the next waiting check as it frees up, so a 23-check suite does not book 23 devices. The pool is never larger than the suite, and if the farm cannot supply it the session fails before anything is booked. A pinned `device-serial` always runs on that one device. To change the limit, ask whoever runs the installation.
+**How many at a time.** The installation decides, not the action: its mobile workflow's Max Concurrency / Session setting is how many checks run in parallel, each on its own device. The installation books a pool of devices when the session starts, runs one check per device, and hands each device to the next waiting check as it frees up, so a 23-check test set does not book 23 devices. The pool is never larger than the test set, and if the farm cannot supply it the session fails before anything is booked. A pinned `device-serial` always runs on that one device. To change the limit, ask whoever runs the installation.
 
 ### Uploading a build
 
@@ -203,13 +206,13 @@ jobs:
           curl -fsSL -H "Authorization: Bearer $BUILDS_TOKEN" \
             -o app.apk https://builds.example.com/android/latest.apk
 
-      - name: Upload it to Agentic QA and run the suite
+      - name: Upload it to Agentic QA and run the test set
         uses: test-IO/agentic-qa-github-action@v1
         with:
           host: ${{ vars.AGENTIC_QA_HOST }}
           token: ${{ secrets.AGENTIC_QA_TOKEN }}
           project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          test-set-id: ${{ vars.AGENTIC_QA_MOBILE_TEST_SET }}
           channel: mobile
           product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
           device-platform: android
@@ -243,13 +246,13 @@ jobs:
           name: apk
           path: build
 
-      - name: Upload it to Agentic QA and run the suite
+      - name: Upload it to Agentic QA and run the test set
         uses: test-IO/agentic-qa-github-action@v1
         with:
           host: ${{ vars.AGENTIC_QA_HOST }}
           token: ${{ secrets.AGENTIC_QA_TOKEN }}
           project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          test-set-id: ${{ vars.AGENTIC_QA_MOBILE_TEST_SET }}
           channel: mobile
           product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
           device-platform: android
@@ -283,13 +286,13 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
 
-      - name: Upload it to Agentic QA and run the suite
+      - name: Upload it to Agentic QA and run the test set
         uses: test-IO/agentic-qa-github-action@v1
         with:
           host: ${{ vars.AGENTIC_QA_HOST }}
           token: ${{ secrets.AGENTIC_QA_TOKEN }}
           project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          test-set-id: ${{ vars.AGENTIC_QA_MOBILE_TEST_SET }}
           channel: mobile
           product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
           device-platform: android
@@ -340,7 +343,7 @@ jobs:
           host: ${{ vars.AGENTIC_QA_HOST }}
           token: ${{ secrets.AGENTIC_QA_TOKEN }}
           project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-          check-suite-id: ${{ vars.AGENTIC_QA_SUITE }}
+          test-set-id: ${{ vars.AGENTIC_QA_TEST_SET }}
           url: https://staging.example.com
           junit-path: reports/agentic-qa.xml
 
@@ -365,7 +368,7 @@ steps:
       # ...
 ```
 
-Run several check suites. Each call to the action is one session, so a matrix gives you one session per suite, all in parallel:
+Run several test sets. Each call to the action is one session, so a matrix gives you one session per test set, all in parallel:
 
 ```yaml
 strategy:
@@ -373,16 +376,16 @@ strategy:
   matrix:
     include:
       - name: smoke
-        suite: ${{ vars.AGENTIC_QA_SUITE_SMOKE }}
+        test-set: ${{ vars.AGENTIC_QA_TEST_SET_SMOKE }}
       - name: checkout
-        suite: ${{ vars.AGENTIC_QA_SUITE_CHECKOUT }}
+        test-set: ${{ vars.AGENTIC_QA_TEST_SET_CHECKOUT }}
 steps:
   - uses: test-IO/agentic-qa-github-action@v1
     with:
       host: ${{ vars.AGENTIC_QA_HOST }}
       token: ${{ secrets.AGENTIC_QA_TOKEN }}
       project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-      check-suite-id: ${{ matrix.suite }}
+      test-set-id: ${{ matrix.test-set }}
       url: https://staging.example.com
       session-name: ${{ matrix.name }} ${{ github.run_number }}
       junit-path: reports/${{ matrix.name }}.xml
@@ -396,14 +399,14 @@ steps:
 
 Name the sessions yourself. The default name is the workflow, the short SHA and the run number, which is the same string for every session in one run, so without `session-name` they are indistinguishable in the UI. The artifact name has to differ per leg too — `upload-artifact@v7` rejects duplicates. Job outputs do not survive a matrix, since GitHub overwrites them leg by leg, so collect the JUnit files as artifacts instead of reading `steps.*.outputs` from a later job.
 
-To run the suites one after another in a single job, give every step its own `id`, `session-name` and `junit-path`:
+To run the test sets one after another in a single job, give every step its own `id`, `session-name` and `junit-path`:
 
 ```yaml
 steps:
   - uses: test-IO/agentic-qa-github-action@v1
     id: smoke
     with:
-      check-suite-id: ${{ vars.AGENTIC_QA_SUITE_SMOKE }}
+      test-set-id: ${{ vars.AGENTIC_QA_TEST_SET_SMOKE }}
       session-name: smoke ${{ github.run_number }}
       junit-path: reports/smoke.xml
       # host, token, project-id, url ...
@@ -412,15 +415,15 @@ steps:
     uses: test-IO/agentic-qa-github-action@v1
     id: checkout
     with:
-      check-suite-id: ${{ vars.AGENTIC_QA_SUITE_CHECKOUT }}
+      test-set-id: ${{ vars.AGENTIC_QA_TEST_SET_CHECKOUT }}
       session-name: checkout ${{ github.run_number }}
       junit-path: reports/checkout.xml
       # ...
 ```
 
-The `if: always()` matters here: the action exits non-zero when checks fail, so without it a failing suite skips every suite after it. The distinct `id` is what lets you read one session's outputs, as in `${{ steps.smoke.outputs.checks-failed }}`.
+The `if: always()` matters here: the action exits non-zero when checks fail, so without it a failing test set skips every test set after it. The distinct `id` is what lets you read one session's outputs, as in `${{ steps.smoke.outputs.checks-failed }}`.
 
-Run a mobile suite on an auto-selected Android phone, installing a binary:
+Run a mobile test set on an auto-selected Android phone, installing a binary:
 
 ```yaml
 - uses: test-IO/agentic-qa-github-action@v1
@@ -428,7 +431,7 @@ Run a mobile suite on an auto-selected Android phone, installing a binary:
     host: ${{ vars.AGENTIC_QA_HOST }}
     token: ${{ secrets.AGENTIC_QA_TOKEN }}
     project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-    check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+    test-set-id: ${{ vars.AGENTIC_QA_MOBILE_TEST_SET }}
     channel: mobile
     product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
     device-platform: android
@@ -446,7 +449,7 @@ On EU phones:
     host: ${{ vars.AGENTIC_QA_HOST }}
     token: ${{ secrets.AGENTIC_QA_TOKEN }}
     project-id: ${{ vars.AGENTIC_QA_PROJECT }}
-    check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+    test-set-id: ${{ vars.AGENTIC_QA_MOBILE_TEST_SET }}
     channel: mobile
     product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
     device-platform: android
@@ -464,7 +467,7 @@ Or on one pinned device, against an app that is already installed:
     product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
     device-serial: R5CT10ABCDE
     app-package: com.example.app
-    # host, token, project-id, check-suite-id ...
+    # host, token, project-id, test-set-id ...
 ```
 
 Web and mobile side by side. They need different inputs, so give each its own job rather than one matrix:
@@ -476,7 +479,7 @@ jobs:
     steps:
       - uses: test-IO/agentic-qa-github-action@v1
         with:
-          check-suite-id: ${{ vars.AGENTIC_QA_SUITE }}
+          test-set-id: ${{ vars.AGENTIC_QA_TEST_SET }}
           url: https://staging.example.com
           # host, token, project-id ...
 
@@ -486,16 +489,16 @@ jobs:
       - uses: test-IO/agentic-qa-github-action@v1
         with:
           channel: mobile
-          check-suite-id: ${{ vars.AGENTIC_QA_MOBILE_SUITE }}
+          test-set-id: ${{ vars.AGENTIC_QA_MOBILE_TEST_SET }}
           product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
           device-platform: ios
           mobile-browser: true
           # host, token, project-id ...
 ```
 
-A check suite belongs to one product, and a product is either web or mobile, so the suite decides the channel — you cannot point a web suite at `channel: mobile` or the reverse.
+A test set belongs to one product, and a product is either web or mobile, so the test set decides the channel — you cannot point a web test set at `channel: mobile` or the reverse.
 
-Run mobile sessions in parallel across platforms. Each platform needs its own suite and its own binary, so carry both in the matrix:
+Run mobile sessions in parallel across platforms. Each platform needs its own test set and its own binary, so carry both in the matrix:
 
 ```yaml
 strategy:
@@ -504,11 +507,11 @@ strategy:
     include:
       - name: android
         platform: android
-        suite: ${{ vars.AGENTIC_QA_SUITE_ANDROID }}
+        test-set: ${{ vars.AGENTIC_QA_TEST_SET_ANDROID }}
         binary: ${{ vars.AGENTIC_QA_BINARY_ANDROID }}
       - name: ios
         platform: ios
-        suite: ${{ vars.AGENTIC_QA_SUITE_IOS }}
+        test-set: ${{ vars.AGENTIC_QA_TEST_SET_IOS }}
         binary: ${{ vars.AGENTIC_QA_BINARY_IOS }}
 steps:
   - uses: test-IO/agentic-qa-github-action@v1
@@ -518,7 +521,7 @@ steps:
       project-id: ${{ vars.AGENTIC_QA_PROJECT }}
       channel: mobile
       product-id: ${{ vars.AGENTIC_QA_MOBILE_PRODUCT }}
-      check-suite-id: ${{ matrix.suite }}
+      test-set-id: ${{ matrix.test-set }}
       device-platform: ${{ matrix.platform }}
       app-binary-id: ${{ matrix.binary }}
       session-name: ${{ matrix.name }} ${{ github.run_number }}
@@ -551,13 +554,15 @@ Fire and forget, for a nightly run you inspect in the UI:
 
 ## Things to know
 
+**Check suites are called test sets now.** Since the Check Library API release, `test-set-id` replaces `check-suite-id` and takes the same UUID. `check-suite-id` still works as a deprecated alias; GitHub logs a warning when a workflow uses it. Repository variables keep working: a workflow set up with `AGENTIC_QA_SUITE` can pass it as `test-set-id`. The action sends the id as both `test_set_id` and `check_suite_id`, so one version of the action works against installations on either side of that release.
+
 **Tokens expire after one month.** This is fixed on the platform side, and there is no renew endpoint. When a token lapses the action stops with a clear message, but someone has to mint a new one and update the secret. Put a reminder in your calendar.
 
 **Stopping the action cancels the session.** When `timeout-seconds` runs out, or the GitHub run is cancelled — by hand, by `concurrency: cancel-in-progress`, or by `timeout-minutes` — the action cancels the session the same way Cancel does in the UI. A timeout always fails the build, because the counts at that point cover only the checks that had been created so far. With `await-completion: false` the action has already exited, so nothing cancels the session. Installations older than the cancel endpoint answer with an error: the action warns and the session keeps running, so stop it from the UI using the `session-url` output.
 
-**Under-counted results used to pass silently.** A suite of 23 checks was once reported as 5, hiding 18 blocked checks behind a green build, because the results were read once the moment the session went `completed`. Hence the settling described under [Check results](#check-results). If you see `results still arriving` in the log, that guard is doing its job.
+**Under-counted results used to pass silently.** A test set of 23 checks was once reported as 5, hiding 18 blocked checks behind a green build, because the results were read once the moment the session went `completed`. Hence the settling described under [Check results](#check-results). If you see `results still arriving` in the log, that guard is doing its job.
 
-**A wrong proxy id would otherwise pass silently.** Nothing downstream rejects one: the column has no foreign key, and the runner logs `proceeding without proxy` and carries on, so the suite goes green having never used the proxy. The action checks `proxy-config-id` against the installation before creating the session and fails with the list of real ones. Sessions started from the UI or MCP still have the original behaviour.
+**A wrong proxy id would otherwise pass silently.** Nothing downstream rejects one: the column has no foreign key, and the runner logs `proceeding without proxy` and carries on, so the run goes green having never used the proxy. The action checks `proxy-config-id` against the installation before creating the session and fails with the list of real ones. Sessions started from the UI or MCP still have the original behaviour.
 
 **Proxies are web only.** The mobile API takes no proxy field, so `proxy-config-id` on a mobile run warns and is dropped.
 
@@ -575,7 +580,7 @@ Fire and forget, for a nightly run you inspect in the UI:
 tests/run_tests.sh
 ```
 
-The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, cancelling, expired tokens, JUnit output and escaping, both channels' request bodies, the binary upload, and the mobile input validation.
+The tests run `scripts/run.sh` end to end against `tests/stub_api.py`, a small stand-in for the REST API. They cover the pass and fail gates, blocked handling, timeouts, cancelling, expired tokens, JUnit output and escaping, both channels' request bodies, the test set id and its deprecated alias, the binary upload, and the mobile input validation.
 
 `scripts/run.sh` uses bash 4 parameter expansion, so run the tests with bash 4 or newer. That is what GitHub-hosted runners have; macOS ships bash 3.2, where you need `brew install bash` and `/opt/homebrew/bin/bash tests/run_tests.sh`.
 
